@@ -1,7 +1,10 @@
 # SPEExpertControl 
 
+![main-screen](https://github.com/user-attachments/assets/f7b14f2b-df57-4a4f-8e39-0634fccd2e02)
+
 Copyright (C) 2025 Phil E Taylor (M0VSE)
-Control SPE Expert Amplifiers
+
+Controler for SPE Expert Amplifiers
 
 This is a "work in progress" application for Arduino Giga R1 and GigaDisplay to control SPE Expert Amplifiers.
 
