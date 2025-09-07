@@ -373,19 +373,7 @@ void process_packet()
         lv_label_set_text_fmt(ui_setupAntFooterText,ant_messages[idx],ordinals[ord]); 
         if (index < 20) // Don't change label of SAVE!     
         {
-          Serial.print("Got antenna status:");
-          Serial.print(packet_in.setup[idx+1]);
-          Serial.print(":");
-          Serial.print(packet_in.setup[idx+1] & 0x07);
-          Serial.print(",");
-          Serial.println((packet_in.setup[idx+1] >> 4) & 0x07);
-
-          if (ord == 0)
-            lv_label_set_text(setup_ant_items[index],ant_num[packet_in.setup[idx+1] & 0x07]);
-          else if (ord == 1)
-            lv_label_set_text(setup_ant_items[index],ant_num[(packet_in.setup[idx+1] >> 4) & 0x07]);
-          else
-            Serial.println("Invalid ordinal received!"); // Not sure how...
+          lv_label_set_text(setup_ant_items[index],ant_num[(packet_in.setup[idx+1] >> (ord*4)) & 0x07]);
         }
         menu_apply_selection(&setup_ant_ctrl, index);
       }
