@@ -12,23 +12,7 @@ Currently only the Expert 1K is supported. Only addition needed is a MAX3232 con
 
 Implemented:
 
-Button handling
-
-Main Receive Screen
-
-TX Screen (partial)
-
-Alarm History screen
-
-System Messages
-
-Warning Screen
-
-Setup Options Screen
-
-Setup Antenna Screen (partial)
-
-Add Power-On option (GPIO->DTR)
+Button handling and all current screens
 
 
 To-Do:
@@ -44,6 +28,9 @@ Anything else I think of (suggestions welcome!)
 Add support for other Expert amps
 
 Make Bootup splash screen actually do something
+
+Add Power-On option (GPIO->DTR)
+
 
 
 Building:
