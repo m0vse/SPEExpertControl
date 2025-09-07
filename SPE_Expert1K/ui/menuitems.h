@@ -55,6 +55,44 @@ extern lv_obj_t * ui_setup10Ant2;
 extern lv_obj_t * ui_setup6Ant1;
 extern lv_obj_t * ui_setup6Ant2;
 extern lv_obj_t * ui_setupAntSave;
+//Cat
+extern lv_obj_t * ui_setupCatSpe;
+extern lv_obj_t * ui_setupCatIcom;
+extern lv_obj_t * ui_setupCatKenwood;
+extern lv_obj_t * ui_setupCatYaesu;
+extern lv_obj_t * ui_setupCatTenTec;
+extern lv_obj_t * ui_setupCatFlexRadio;
+extern lv_obj_t * ui_setupCatRs232;
+extern lv_obj_t * ui_setupCatNone;
+//Yaesu
+extern lv_obj_t * ui_setupYaesuFT100;
+extern lv_obj_t * ui_setupYaesuFT757;
+extern lv_obj_t * ui_setupYaesuFT817;
+extern lv_obj_t * ui_setupYaesuFT840;
+extern lv_obj_t * ui_setupYaesuFT897;
+extern lv_obj_t * ui_setupYaesuFT900;
+extern lv_obj_t * ui_setupYaesuFT920;
+extern lv_obj_t * ui_setupYaesuFT990;
+extern lv_obj_t * ui_setupYaesuFT1000;
+extern lv_obj_t * ui_setupYaesuFT1000MP1;
+extern lv_obj_t * ui_setupYaesuFT1000MP2;
+extern lv_obj_t * ui_setupYaesuFT1000MP3;
+extern lv_obj_t * ui_setupYaesuFT2000;
+extern lv_obj_t * ui_setupYaesuFT9000;
+extern lv_obj_t * ui_setupYaesuBandData;
+//Icom
+extern lv_obj_t * ui_setupIcomCiv;
+extern lv_obj_t * ui_setupIcomVoltage;
+//TenTec
+extern lv_obj_t * ui_setupTenTecOmni;
+extern lv_obj_t * ui_setupTenTecOrion;
+extern lv_obj_t * ui_setupTenTecJupiter;
+extern lv_obj_t * ui_setupTenTecArgonaut;
+// Baud Rate
+extern lv_obj_t * ui_setupBaud1200;
+extern lv_obj_t * ui_setupBaud2400;
+extern lv_obj_t * ui_setupBaud4800;
+extern lv_obj_t * ui_setupBaud9600;
 
 #ifdef __cplusplus
 } /*extern "C"*/

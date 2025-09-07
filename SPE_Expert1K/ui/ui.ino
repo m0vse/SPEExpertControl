@@ -48,7 +48,17 @@ const char* warnings[] = {"0x10: DEBUGGING (IGNORE)",        "POWER MANAGEMENT :
                           "0x20: DEBUGGING (IGNORE)",        "P.A.MANAGEMENT : PW REV > 300W",  
                           "P.A. MANAGEMENT : PA PROTECTION" };
                           
-const char* headings[] = { " SETUP OPTIONS vs. IN %s ", " SET ANTENNA vs. IN %s "};
+const char* headings[] = { 
+          " SETUP OPTIONS vs. IN %s ", 
+          " SET ANTENNA vs. IN %s ",
+          " SET CAT vs. IN %s ",
+          " SET YAESU vs. IN %s ",
+          " SET ICOM vs. IN %s ",
+          " SET TEN-TEC vs. IN %s ",
+          " SET BAUD RATE vs. IN %s ",
+          "[←↑] [↓→]:SELECT          [SET]:CHANGE",
+          "[←↑] [↓→]:SELECT         [SET]:CONFIRM"
+};
 
 const char* baud_rate[] = {"1200 Baud","2400 Baud","4800 Baud","9600 Baud"};
 
@@ -86,10 +96,10 @@ enum ExpertStatus {Sync,Len,Data,Sum};
 
 enum ExpertCommands {Key_On=0x10,Rcu_On=0x80,Rcu_Off=0x81,Cat_232=0x82};
 
-enum ExpertKeys {L_Plus_Key=0x30,L_Minus_Key=0x31,C_Minus_Key=0x32,C_Plus_Key=0x33,Tune_Key=0x34,In_Key=0x28,Band_Minus_Key=0x29,Band_Plus_Key=0x2A,
+enum ExpertKeys {L_Minus_Key=0x30,L_Plus_Key=0x31,C_Minus_Key=0x32,C_Plus_Key=0x33,Tune_Key=0x34,In_Key=0x28,Band_Minus_Key=0x29,Band_Plus_Key=0x2A,
                 Ant_Key=0x2B,Cat_Key=0x2C,Left_Key=0x2D,Right_Key=0x2E,Set_Key=0x2F,Off_Key=0x18,Power_Key=0x1A,Display_Key=0x1B,Operate_Key=0x1C};
 
-enum ExpertScreen {Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,Data_Stored,Unused_Screen_A,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,SetTenTec,
+enum ExpertScreen {Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,Data_Stored,Unused_Screen_A,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
                   Set_BaudRate,Manual_Tune,Backlight,Unused_Screen_B,Unused_Screen_C,
                   Warning_V_Low_Half,Warning_V_Low_Full,Warning_V_High_Half,Warning_V_High_Full,Warning_A_High_Half,Warning_A_High_Full,Warning_Temp,Warning_Over_Driving,
                   Unused_Screen_D,Unused_Screen_E,Warning_Reverse,Warning_Protection,
@@ -102,6 +112,21 @@ static lv_obj_t *setup_options_items[9];
 
 menu_ctrl_t setup_ant_ctrl;
 static lv_obj_t *setup_ant_items[21];
+
+menu_ctrl_t setup_cat_ctrl;
+static lv_obj_t *setup_cat_items[8];
+
+menu_ctrl_t setup_yaesu_ctrl;
+static lv_obj_t *setup_yaesu_items[15];
+
+menu_ctrl_t setup_icom_ctrl;
+static lv_obj_t *setup_icom_items[2];
+
+menu_ctrl_t setup_tentec_ctrl;
+static lv_obj_t *setup_tentec_items[4];
+
+menu_ctrl_t setup_baudrate_ctrl;
+static lv_obj_t *setup_baudrate_items[4];
 
 ExpertStatus expert = Sync;
 ExpertScreen screen = BootMessage;
@@ -168,6 +193,51 @@ void setup() {
   setup_ant_items[19] = ui_setup6Ant2;
   setup_ant_items[20] = ui_setupAntSave;
   menu_ctrl_init(&setup_ant_ctrl, setup_ant_items, COUNT_OF(setup_ant_items));
+
+  setup_cat_items[0] = ui_setupCatSpe;
+  setup_cat_items[1] = ui_setupCatIcom;
+  setup_cat_items[2] = ui_setupCatKenwood;
+  setup_cat_items[3] = ui_setupCatYaesu;
+  setup_cat_items[4] = ui_setupCatTenTec;
+  setup_cat_items[5] = ui_setupCatFlexRadio;
+  setup_cat_items[6] = ui_setupCatRs232;
+  setup_cat_items[7] = ui_setupCatNone;
+  menu_ctrl_init(&setup_cat_ctrl, setup_cat_items, COUNT_OF(setup_cat_items));
+
+  setup_yaesu_items[0] = ui_setupYaesuFT100;
+  setup_yaesu_items[1] = ui_setupYaesuFT757;
+  setup_yaesu_items[2] = ui_setupYaesuFT817;
+  setup_yaesu_items[3] = ui_setupYaesuFT840;
+  setup_yaesu_items[4] = ui_setupYaesuFT897;
+  setup_yaesu_items[5] = ui_setupYaesuFT900;
+  setup_yaesu_items[6] = ui_setupYaesuFT920;
+  setup_yaesu_items[7] = ui_setupYaesuFT990;
+  setup_yaesu_items[8] = ui_setupYaesuFT1000;
+  setup_yaesu_items[9] = ui_setupYaesuFT1000MP1;
+  setup_yaesu_items[10] = ui_setupYaesuFT1000MP2;
+  setup_yaesu_items[11] = ui_setupYaesuFT1000MP3;
+  setup_yaesu_items[12] = ui_setupYaesuFT2000;
+  setup_yaesu_items[13] = ui_setupYaesuFT9000;
+  setup_yaesu_items[14] = ui_setupYaesuBandData;
+  menu_ctrl_init(&setup_yaesu_ctrl, setup_yaesu_items, COUNT_OF(setup_yaesu_items));
+
+  setup_icom_items[0] = ui_setupIcomCiv;
+  setup_icom_items[1] = ui_setupIcomVoltage;
+  menu_ctrl_init(&setup_icom_ctrl, setup_icom_items, COUNT_OF(setup_icom_items));
+
+  setup_tentec_items[0] = ui_setupTenTecOmni;
+  setup_tentec_items[1] = ui_setupTenTecOrion;
+  setup_tentec_items[2] = ui_setupTenTecJupiter;
+  setup_tentec_items[3] = ui_setupTenTecArgonaut;
+  menu_ctrl_init(&setup_tentec_ctrl, setup_tentec_items, COUNT_OF(setup_tentec_items));
+
+  setup_baudrate_items[0] = ui_setupBaud1200;
+  setup_baudrate_items[1] = ui_setupBaud2400;
+  setup_baudrate_items[2] = ui_setupBaud4800;
+  setup_baudrate_items[3] = ui_setupBaud1200;
+  menu_ctrl_init(&setup_baudrate_ctrl, setup_baudrate_items, COUNT_OF(setup_baudrate_items));
+
+
 
   last_rcu=millis();
 }
@@ -248,7 +318,7 @@ void process_packet()
     if (memcmp(&last_status,&packet_in,sizeof last_status))
     {
       // Select current screen
-      // Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,UnusedA,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,SetTenTec,
+      // Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,UnusedA,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
       // Set_BaudRate,Manual_Tune,Backlight,UnusedB,UnusedC,Alarm_History,Shutdown
       ExpertScreen scr = static_cast<ExpertScreen>(packet_in.display_ctx);
       
@@ -263,6 +333,7 @@ void process_packet()
         lv_obj_add_flag(ui_receive, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_manualTune, LV_OBJ_FLAG_HIDDEN); 
+        lv_obj_add_flag(ui_backlight, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_alarmHistory, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_alarmControl, LV_OBJ_FLAG_HIDDEN); 
@@ -271,6 +342,11 @@ void process_packet()
         lv_obj_add_flag(ui_setupOptions, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_setupAntOptions, LV_OBJ_FLAG_HIDDEN); 
+        lv_obj_add_flag(ui_setupCatOptions, LV_OBJ_FLAG_HIDDEN); 
+        lv_obj_add_flag(ui_setupYaesuOptions, LV_OBJ_FLAG_HIDDEN); 
+        lv_obj_add_flag(ui_setupIcomOptions, LV_OBJ_FLAG_HIDDEN); 
+        lv_obj_add_flag(ui_setupTenTecOptions, LV_OBJ_FLAG_HIDDEN); 
+        lv_obj_add_flag(ui_setupBaudRateOptions, LV_OBJ_FLAG_HIDDEN); 
         switch (scr) {
           case Receive_Screen:
             lv_obj_remove_flag(ui_receive, LV_OBJ_FLAG_HIDDEN);
@@ -301,6 +377,33 @@ void process_packet()
                 lv_label_set_text(setup_ant_items[(f*2)+g],ant_num[(packet_in.setup[f+1] >> (g*4)) & 0x07]);
               }
             }
+            break;
+          case Set_Cat:
+            lv_obj_remove_flag(ui_setupCatOptions, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text_fmt(ui_setupCatHeaderText,headings[2],inputs[packet_in.band_input & 0x01]);
+            break;
+          case Set_Yaesu:
+            lv_obj_remove_flag(ui_setupYaesuOptions, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text_fmt(ui_setupIcomHeaderText,headings[3],inputs[packet_in.band_input & 0x01]);
+            break;
+          case Set_Icom:
+            lv_obj_remove_flag(ui_setupIcomOptions, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text_fmt(ui_setupIcomHeaderText,headings[4],inputs[packet_in.band_input & 0x01]);
+            break;
+          case Set_TenTec:
+            lv_obj_remove_flag(ui_setupTenTecOptions, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text_fmt(ui_setupTenTecHeaderText,headings[5],inputs[packet_in.band_input & 0x01]);
+            break;
+          case Set_BaudRate:
+            lv_obj_remove_flag(ui_setupBaudRateOptions, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text_fmt(ui_setupBaudRateHeaderText,headings[6],inputs[packet_in.band_input & 0x01]);
+            break;
+          case Manual_Tune:
+            lv_obj_remove_flag(ui_manualTune, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+            break;
+          case Backlight:
+            lv_obj_remove_flag(ui_backlight, LV_OBJ_FLAG_HIDDEN);
             break;
           case Shutdown:
             lv_obj_remove_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN);
@@ -346,38 +449,86 @@ void process_packet()
         if (wrn_no > 3 && (packet_in.setup[wrn_idx-3] & 0x0f) < 0x0D)
           lv_label_set_text_fmt(ui_alarmLine4, "%*d)IN %s %s",2,wrn_idx-3,inputs[(packet_in.setup[wrn_idx-3] >> 7) & 0x01],warnings[packet_in.setup[wrn_idx-3] & 0x0f]);
       } 
-      else if (scr == Setup_Options && memcmp(&last_status.setup,&packet_in.setup,sizeof last_status.setup)) 
+
+      if (memcmp(&last_status.setup,&packet_in.setup,sizeof last_status.setup))
       {
-        // Setup_Options Menu has changed.
-        lv_label_set_text_fmt(ui_setupFooterText,"%s",setup_messages[packet_in.setup[1] & 0x0f]);        
-        menu_apply_selection(&setup_options_ctrl, packet_in.setup[1] & 0x0f);
-      }
-
-      else if (scr == Set_Antenna &&  memcmp(&last_status.setup,&packet_in.setup,sizeof last_status.setup)) 
-      {
-        // Setup_Options Menu has changed.
-        // The documentation appears to be incorrect. It suggests that the setup[0] defines the band 
-        // and in each other setup bit 7 shows the current selected ant.
-        // This does not appear to be the case, as setup[0] goes up to 20!
-        uint8_t index = packet_in.setup[0];
-        uint8_t idx = index / 2;
-        uint8_t ord = index % 2;
-
-        // ord = (packet_in.setup[idx+1] >> 7) & 0x01;
-        
-        Serial.print("Got band:");
-        Serial.print(idx);
-        Serial.print(" Ordinal:");
-        Serial.println(ord);
-
-        lv_label_set_text_fmt(ui_setupAntFooterText,ant_messages[idx],ordinals[ord]); 
-        if (index < 20) // Don't change label of SAVE!     
+        // Something has changed!
+        if (scr == Setup_Options) 
         {
-          lv_label_set_text(setup_ant_items[index],ant_num[(packet_in.setup[idx+1] >> (ord*4)) & 0x07]);
+          // Setup_Options Menu has changed.
+          lv_label_set_text_fmt(ui_setupFooterText,"%s",setup_messages[packet_in.setup[1] & 0x0f]);        
+          menu_apply_selection(&setup_options_ctrl, packet_in.setup[1] & 0x0f);
         }
-        menu_apply_selection(&setup_ant_ctrl, index);
-      }
+        else if (scr == Set_Antenna) 
+        {
+          // Setup_Options Menu has changed.
+          // The documentation appears to be incorrect. It suggests that the setup[0] defines the band 
+          // and in each other setup bit 7 shows the current selected ant.
+          // This does not appear to be the case, as setup[0] goes up to 20!
+          uint8_t index = packet_in.setup[0];
+          uint8_t idx = index / 2;
+          uint8_t ord = index % 2;
 
+          lv_label_set_text_fmt(ui_setupAntFooterText,ant_messages[idx],ordinals[ord]); 
+          if (index < 20) // Don't change label of SAVE!     
+          {
+            lv_label_set_text(setup_ant_items[index],ant_num[(packet_in.setup[idx+1] >> (ord*4)) & 0x07]);
+            if (setup_ant_ctrl.selected == 20) { // Was previously SAVE
+              lv_label_set_text(ui_setupAntBottomLabel,headings[7]);
+            }
+          } else {
+            lv_label_set_text(ui_setupAntBottomLabel,headings[8]);
+          }
+          menu_apply_selection(&setup_ant_ctrl, index);
+        }
+        else if (scr == Set_Cat) 
+        {
+          menu_apply_selection(&setup_cat_ctrl, packet_in.setup[1]);
+        }
+        else if (scr == Set_Yaesu) 
+        {
+          menu_apply_selection(&setup_yaesu_ctrl, packet_in.setup[1]);
+        }
+        else if (scr == Set_Icom) 
+        {
+          menu_apply_selection(&setup_icom_ctrl, packet_in.setup[1]);
+        }
+        else if (scr == Set_TenTec) 
+        {
+          menu_apply_selection(&setup_tentec_ctrl, packet_in.setup[1]);
+        }
+        else if (scr == Set_BaudRate) 
+        {
+          menu_apply_selection(&setup_baudrate_ctrl, packet_in.setup[1]);
+        }
+        else if (scr == Manual_Tune)
+        {
+          // Update ManualTune contents
+          lv_label_set_text_fmt(ui_manualTuneFreq,"%*.3f MHz",6,float(packet_in.freq)/1000.0);
+          lv_label_set_text_fmt(ui_manualTuneSubBand,"%*d",3,packet_in.sub_band);
+
+          lv_label_set_text_fmt(ui_manualTuneuHLabel,"%*.1f uH",7,float(packet_in.setup[1])/10.0);
+          lv_bar_set_value(ui_manualTuneuH, packet_in.setup[1], LV_ANIM_ON);
+
+          uint16_t mask = (static_cast<uint16_t>(packet_in.setup[3]) << 8) | packet_in.setup[2];
+          static const double weights[10] = { 3.6, 6.4, 12.1, 18.9, 40.8, 81.5, 158.0, 321.5, 641.6, 1250.0 };
+
+          double pF = 0.0;
+          for (int i = 0; i < 10; i++) {
+              if (mask & (1u << i)) {
+                  pF += weights[i];
+              }
+          }
+
+          lv_label_set_text_fmt(ui_manualTunepFLabel,"%*.1f pF",7,pF);
+          lv_bar_set_value(ui_manualTunepF, pF, LV_ANIM_ON);
+        }
+        else if (scr == Backlight)
+        {
+          // Update ManualTune contents
+          lv_bar_set_value(ui_backlightLevel, packet_in.setup[1], LV_ANIM_ON);
+        }
+      }
       // No point updating any other ui elements unless they have actually changed since the last update.
 
       // Standby/Operate screen data
@@ -396,11 +547,11 @@ void process_packet()
       }
 
       if (last_status.power != packet_in.power) {
-        lv_label_set_text_fmt(ui_pep,"%*.1f W pep",6,float(packet_in.power)/10);      
+        lv_label_set_text_fmt(ui_pep,"%*.1f W pep",6,float(packet_in.power)/10.0);      
       }
 
       if (last_status.voltage != packet_in.voltage) {
-        lv_label_set_text_fmt(ui_vPA,"%*.1f v",4,float(packet_in.voltage)/10);      
+        lv_label_set_text_fmt(ui_vPA,"%*.1f v",4,float(packet_in.voltage)/10.0);      
         lv_bar_set_value(ui_vBar, packet_in.voltage/10, LV_ANIM_ON);
       }
 
@@ -408,7 +559,7 @@ void process_packet()
         if (packet_in.swr_gain == 0)
           lv_label_set_text(ui_swrLabel,"SWR\n--.--");
         else
-          lv_label_set_text_fmt(ui_swrLabel,"SWR\n%*.2f",5,float(packet_in.swr_gain)/100);
+          lv_label_set_text_fmt(ui_swrLabel,"SWR\n%*.2f",5,float(packet_in.swr_gain)/100.0);
       }
 
       if (last_status.temp != packet_in.temp) {
@@ -506,7 +657,7 @@ void button_pressed(lv_event_t * e)
 {
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target_obj(e);
-  if(code == LV_EVENT_CLICKED) {
+  if(code == LV_EVENT_CLICKED || code == LV_EVENT_LONG_PRESSED_REPEAT) {
     if (obj == ui_buttonLowerL)
       send_command({Key_On,L_Minus_Key});
     else if (obj == ui_buttonHigherL)
