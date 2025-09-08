@@ -19,11 +19,15 @@ typedef struct {
     lv_style_t st_checked; 
 } menu_ctrl_t;
 
-const char* outs[] = {"HALF","FULL"};
+const char* outs[] = {"HALF", "FULL"};
 
-const char* tscales[] = {"°F","°C"};
+const char* tscales[] = {"°F", "°C"};
 
-const char* inputs[] = {"1","2"};
+const char* startup[] = {"Standby", "Operate"};
+
+const char* onoff[] = {"Off", "On "};
+
+const char* inputs[] = {"1", "2"};
 
 const char* ordinals[] = {"1st","2nd","3rd","4th"};
 
@@ -31,7 +35,7 @@ const char* antennas[] = {"1","2","3","4"};
 
 const char* bands[] = {"160 m","80 m","40 m","30 m","20 m","17 m","15 m","12 m","10 m","6 m"};
 
-const char* cats[] = {"SPE","ICOM","KENWD","YAESU","TTEC","FLEX","RS232","nNONE" };
+const char* cats[] = {"SPE","ICOM","KENWD","YAESU","TTEC","FLEX","RS232","NONE" };
 
 const char* cat_icom[] = {"CI-V","VOLTAGE_BAND"};
 
@@ -142,6 +146,7 @@ uint8_t checksum = 0x00;
 uint8_t len_in = 0x00;
 unsigned long last_rcu=0;
 const unsigned long interval = 1000;
+bool hold = false;
 
 void setup() {
   Serial.begin(9600); // Debug logging
@@ -327,11 +332,12 @@ void process_packet()
           lv_disp_load_scr(ui_mainScreen);
       }
 
-      if (screen != scr) {
+      if ((screen != scr || packet_in.flags != last_status.flags) && !hold ) {
         // Screen has changed, so lets display it, hide everything first.
         // Need to tidy this, probably create an array of all screen objects?
         lv_obj_add_flag(ui_receive, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN); 
+        lv_obj_add_flag(ui_catStatus, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_manualTune, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_backlight, LV_OBJ_FLAG_HIDDEN); 
         lv_obj_add_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN); 
@@ -349,13 +355,75 @@ void process_packet()
         lv_obj_add_flag(ui_setupBaudRateOptions, LV_OBJ_FLAG_HIDDEN); 
         switch (scr) {
           case Receive_Screen:
-            lv_obj_remove_flag(ui_receive, LV_OBJ_FLAG_HIDDEN);
+            if ((packet_in.flags >> 2) & 0x01) {
+              // TX mode
+              lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
+              lv_label_set_text(ui_powerLabel,"  OUT ");
+              lv_obj_add_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
+            } else {
+              lv_obj_remove_flag(ui_receive, LV_OBJ_FLAG_HIDDEN);
+              lv_obj_remove_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
+            }
             lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
             break;
+          case Cat_Screen:
+          {
+            hold=true;
+            lv_obj_remove_flag(ui_catStatus, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN);
+
+            const char *type1=NULL;
+            const char *type2=NULL;
+
+            uint8_t s0 = packet_in.setup[0] & 0x0F;
+            uint8_t s1 = packet_in.setup[1] & 0x0F;
+            uint8_t s3 = packet_in.setup[3] & 0x0F;
+            uint8_t s4 = packet_in.setup[3] & 0x0F;
+
+            if ((s0 == 0x01)) {
+                type1 = cat_icom[s1];  
+            } else if ((s0 == 0x03)) {
+                type1 = cat_yaesu[s1]; 
+            } else if ((s0 == 0x04)) {
+                type1 = cat_tentec[s1]; 
+            } else {
+                lv_obj_add_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN);
+            }
+
+            if ((s3 == 0x01)) {
+                type2 = cat_icom[s4];
+            } else if ((s3 == 0x03)) {
+                type2 = cat_yaesu[s4];
+            } else if ((s3 == 0x04)) {
+                type2 = cat_tentec[s4];
+            } else {
+                lv_obj_add_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN);
+            }
+
+            lv_label_set_text_fmt(ui_catStatus1, " CAT: %s", cats[s0]);
+            lv_label_set_text_fmt(ui_catStatus2, " CAT: %s", cats[s3]);
+
+            if (!lv_obj_has_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN))
+                lv_label_set_text_fmt(ui_catType1, "TYPE: %s", type1 ? type1 : "");
+
+            if (!lv_obj_has_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN))
+                lv_label_set_text_fmt(ui_catType2, "TYPE: %s", type2 ? type2 : "");
+            
+            lv_label_set_text_fmt(ui_version," VER:%d%d_%d%d_%d%d_%c",
+                  (packet_in.setup[6] >> 4) & 0x0f, packet_in.setup[6] & 0x0f,
+                  (packet_in.setup[7] >> 4) & 0x0f, packet_in.setup[7] & 0x0f,
+                  (packet_in.setup[8] >> 4) & 0x0f, packet_in.setup[8] & 0x0f, (char)packet_in.setup[9]);
+            break;
+          }
           case Operate_RX:
           case Operate_TX:
             lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
+            lv_label_set_text(ui_powerLabel,"PA OUT");
+            lv_label_set_text(ui_vPALabel,  "  I PA");
             break;
           case Alarm_History:
             lv_obj_remove_flag(ui_alarmHistory, LV_OBJ_FLAG_HIDDEN);
@@ -450,13 +518,19 @@ void process_packet()
           lv_label_set_text_fmt(ui_alarmLine4, "%*d)IN %s %s",2,wrn_idx-3,inputs[(packet_in.setup[wrn_idx-3] >> 7) & 0x01],warnings[packet_in.setup[wrn_idx-3] & 0x0f]);
       } 
 
-      if (memcmp(&last_status.setup,&packet_in.setup,sizeof last_status.setup))
+      if (memcmp(&last_status.setup,&packet_in.setup,sizeof last_status.setup)|| last_status.flags != packet_in.flags)
       {
         // Something has changed!
         if (scr == Setup_Options) 
         {
           // Setup_Options Menu has changed.
           lv_label_set_text_fmt(ui_setupFooterText,"%s",setup_messages[packet_in.setup[1] & 0x0f]);        
+          // We need to update the menu options that are changeable
+          lv_label_set_text_fmt(ui_setupContest,"CONTEST %s",onoff[(packet_in.flags >> 5) & 0x01]);
+          lv_label_set_text_fmt(ui_setupBeep,   "BEEP    %s",onoff[(packet_in.flags >> 6) & 0x01]);
+          lv_label_set_text_fmt(ui_setupStart,  "START   %s",startup[(packet_in.flags >> 1) & 0x01]);
+          lv_label_set_text_fmt(ui_setupTemp,   "TEMP    %s",tscales[(packet_in.flags >> 7) & 0x01]);
+
           menu_apply_selection(&setup_options_ctrl, packet_in.setup[1] & 0x0f);
         }
         else if (scr == Set_Antenna) 
@@ -510,12 +584,18 @@ void process_packet()
           lv_label_set_text_fmt(ui_manualTuneuHLabel,"%*.1f uH",7,float(packet_in.setup[1])/10.0);
           lv_bar_set_value(ui_manualTuneuH, packet_in.setup[1], LV_ANIM_ON);
 
-          uint16_t mask = (static_cast<uint16_t>(packet_in.setup[3]) << 8) | packet_in.setup[2];
+
+          uint8_t lo = packet_in.setup[2];
+          uint8_t hi = packet_in.setup[3] & 0x03;
+          uint16_t raw = (static_cast<uint16_t>((hi) << 8) | lo);
+
+          for (int i = 9; i >= 0; --i) Serial.print((raw >> i) & 1);
+          
           static const double weights[10] = { 3.6, 6.4, 12.1, 18.9, 40.8, 81.5, 158.0, 321.5, 641.6, 1250.0 };
 
           double pF = 0.0;
-          for (int i = 0; i < 10; i++) {
-              if (mask & (1u << i)) {
+          for (int i = 0; i < 10; ++i) {
+              if (raw & (1u << i)) {
                   pF += weights[i];
               }
           }
@@ -547,11 +627,20 @@ void process_packet()
       }
 
       if (last_status.power != packet_in.power) {
-        lv_label_set_text_fmt(ui_pep,"%*.1f W pep",6,float(packet_in.power)/10.0);      
+        if (scr == Operate_TX) {
+          lv_label_set_text_fmt(ui_pep,"%*.1f W pep",6,float(packet_in.power)/10.0);      
+        } else {
+          lv_label_set_text_fmt(ui_pep,"%*.1f W pep",6,float(packet_in.power)/10.0);     
+        } 
+        lv_bar_set_value(ui_powerBar, packet_in.power/10, LV_ANIM_ON);
       }
 
       if (last_status.voltage != packet_in.voltage) {
-        lv_label_set_text_fmt(ui_vPA,"%*.1f v",4,float(packet_in.voltage)/10.0);      
+        if (scr == Operate_TX) {
+          lv_label_set_text_fmt(ui_vPA,"%*.1f A",4,float(packet_in.voltage)/10.0);      
+        } else {
+          lv_label_set_text_fmt(ui_vPA,"%*.1f v",4,float(packet_in.voltage)/10.0);      
+        }
         lv_bar_set_value(ui_vBar, packet_in.voltage/10, LV_ANIM_ON);
       }
 
@@ -655,6 +744,7 @@ Ant_Key=0x2B,Cat_Key=0x2C,Left_Key=0x2D,Right_Key=0x2E,Set_Key=0x2F,Off_Key=0x18
 
 void button_pressed(lv_event_t * e)
 {
+  hold = false;
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target_obj(e);
   if(code == LV_EVENT_CLICKED || code == LV_EVENT_LONG_PRESSED_REPEAT) {

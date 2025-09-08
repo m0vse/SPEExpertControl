@@ -15,8 +15,8 @@ extern void ui_bootScreen_screen_init(void);
 extern void ui_bootScreen_screen_destroy(void);
 extern lv_obj_t * ui_bootScreen;
 extern lv_obj_t * ui_Image1;
-extern lv_obj_t * ui_Bar4;
-extern lv_obj_t * ui_Label47;
+extern lv_obj_t * ui_startupBar;
+extern lv_obj_t * ui_startupMessage;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

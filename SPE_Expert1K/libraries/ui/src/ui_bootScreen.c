@@ -7,8 +7,8 @@
 
 lv_obj_t * ui_bootScreen = NULL;
 lv_obj_t * ui_Image1 = NULL;
-lv_obj_t * ui_Bar4 = NULL;
-lv_obj_t * ui_Label47 = NULL;
+lv_obj_t * ui_startupBar = NULL;
+lv_obj_t * ui_startupMessage = NULL;
 // event funtions
 
 // build funtions
@@ -25,36 +25,34 @@ void ui_bootScreen_screen_init(void)
     lv_image_set_src(ui_Image1, &ui_img_spe_png);
     lv_obj_set_width(ui_Image1, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_Image1, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_Image1, 3);
+    lv_obj_set_x(ui_Image1, 0);
     lv_obj_set_y(ui_Image1, -124);
     lv_obj_set_align(ui_Image1, LV_ALIGN_CENTER);
     lv_obj_add_flag(ui_Image1, LV_OBJ_FLAG_CLICKABLE);     /// Flags
     lv_obj_remove_flag(ui_Image1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
-    ui_Bar4 = lv_bar_create(ui_bootScreen);
-    lv_bar_set_value(ui_Bar4, 25, LV_ANIM_OFF);
-    lv_bar_set_start_value(ui_Bar4, 0, LV_ANIM_OFF);
-    lv_obj_set_width(ui_Bar4, 716);
-    lv_obj_set_height(ui_Bar4, 82);
-    lv_obj_set_x(ui_Bar4, 1);
-    lv_obj_set_y(ui_Bar4, 52);
-    lv_obj_set_align(ui_Bar4, LV_ALIGN_CENTER);
-    lv_obj_set_style_bg_color(ui_Bar4, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Bar4, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_startupBar = lv_bar_create(ui_bootScreen);
+    lv_obj_set_width(ui_startupBar, 716);
+    lv_obj_set_height(ui_startupBar, 82);
+    lv_obj_set_x(ui_startupBar, 0);
+    lv_obj_set_y(ui_startupBar, 52);
+    lv_obj_set_align(ui_startupBar, LV_ALIGN_CENTER);
+    lv_obj_set_style_bg_color(ui_startupBar, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_startupBar, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_set_style_bg_color(ui_Bar4, lv_color_hex(0x000000), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_Bar4, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(ui_startupBar, lv_color_hex(0x000000), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_startupBar, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-    if(lv_obj_get_style_pad_top(ui_Bar4, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_Bar4,
-                                                                                           lv_obj_get_style_pad_right(ui_Bar4, LV_PART_MAIN) + 1, LV_PART_MAIN);
-    ui_Label47 = lv_label_create(ui_bootScreen);
-    lv_obj_set_width(ui_Label47, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Label47, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_Label47, -1);
-    lv_obj_set_y(ui_Label47, 174);
-    lv_obj_set_align(ui_Label47, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_Label47, "Initializing");
+    if(lv_obj_get_style_pad_top(ui_startupBar, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_startupBar,
+                                                                                                 lv_obj_get_style_pad_right(ui_startupBar, LV_PART_MAIN) + 1, LV_PART_MAIN);
+    ui_startupMessage = lv_label_create(ui_bootScreen);
+    lv_obj_set_width(ui_startupMessage, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_startupMessage, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_startupMessage, 0);
+    lv_obj_set_y(ui_startupMessage, 174);
+    lv_obj_set_align(ui_startupMessage, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_startupMessage, "Initializing");
 
 }
 
@@ -65,7 +63,7 @@ void ui_bootScreen_screen_destroy(void)
     // NULL screen variables
     ui_bootScreen = NULL;
     ui_Image1 = NULL;
-    ui_Bar4 = NULL;
-    ui_Label47 = NULL;
+    ui_startupBar = NULL;
+    ui_startupMessage = NULL;
 
 }
