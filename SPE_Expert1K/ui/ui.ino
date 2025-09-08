@@ -585,13 +585,20 @@ void process_packet()
           lv_bar_set_value(ui_manualTuneuH, packet_in.setup[1], LV_ANIM_ON);
 
 
+
+
           uint8_t lo = packet_in.setup[2];
           uint8_t hi = packet_in.setup[3] & 0x03;
           uint16_t raw = (static_cast<uint16_t>((hi) << 8) | lo);
 
+          Serial.print("Low:");
+          Serial.print(lo);
+          Serial.print(" High:");
+          Serial.println(hi);
+
           for (int i = 9; i >= 0; --i) Serial.print((raw >> i) & 1);
           
-          static const double weights[10] = { 3.6, 6.4, 12.1, 18.9, 40.8, 81.5, 158.0, 321.5, 641.6, 1250.0 };
+          static const double weights[10] = { 5.2, 6.5, 12.5, 21.0, 40.9, 86.5, 168.0, 342.0, 693.5, 1384.5 };
 
           double pF = 0.0;
           for (int i = 0; i < 10; ++i) {
