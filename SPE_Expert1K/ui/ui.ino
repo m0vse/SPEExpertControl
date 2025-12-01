@@ -6,6 +6,20 @@
 #include <ui.h>
 #include "menuitems.h"
 
+#include <WiFi.h>
+
+#include "secret.h" 
+///////please enter your sensitive data in the Secret tab/secret.h
+char ssid[] = SECRET_SSID;        // your network SSID (name)
+char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
+int keyIndex = 0;                 // your network key index number (needed only for WEP)
+
+int wifi_status = WL_IDLE_STATUS;
+int last_wifi_status = WL_IDLE_STATUS;
+
+WiFiServer server(80);
+uint8_t progress = 0;
+
 Arduino_H7_Video Display( 800, 480, GigaDisplayShield ); //( 800, 480, GigaDisplayShield );
 Arduino_GigaDisplayTouch TouchDetector;
 
@@ -150,6 +164,7 @@ bool hold = false;
 
 void setup() {
   Serial.begin(9600); // Debug logging
+  pinMode(LED_BUILTIN, OUTPUT);      // set the LED pin mode
 
   Display.begin();
   TouchDetector.begin();
@@ -239,16 +254,92 @@ void setup() {
   setup_baudrate_items[0] = ui_setupBaud1200;
   setup_baudrate_items[1] = ui_setupBaud2400;
   setup_baudrate_items[2] = ui_setupBaud4800;
-  setup_baudrate_items[3] = ui_setupBaud1200;
+  setup_baudrate_items[3] = ui_setupBaud9600;
   menu_ctrl_init(&setup_baudrate_ctrl, setup_baudrate_items, COUNT_OF(setup_baudrate_items));
 
+  // check for the WiFi module:
+  wifi_status = WiFi.status();
+  lv_label_set_text_fmt(ui_startupMessage, "Wifi connecting to: %s", ssid);
 
+  if (wifi_status == WL_NO_MODULE) {
+    Serial.println("Communication with WiFi module failed!");
+  }
 
   last_rcu=millis();
+  lv_disp_load_scr(ui_bootScreen);
+  lv_timer_handler();
+  //wifi_status = WiFi.begin(ssid, pass);
+
 }
 
 void loop()
 {
+  
+  wifi_status = WiFi.status();
+  lv_timer_handler();
+
+  if (wifi_status != WL_CONNECTED && progress < 50) {
+    progress++;
+    lv_bar_set_value(ui_startupBar, progress, LV_ANIM_ON);
+    delay(5); // Wait for a bit before running through the loop again.
+    return; // We don't want the rest of the loop to continue
+  } 
+  else if (wifi_status == WL_CONNECTED) 
+  {
+    if (last_wifi_status != WL_CONNECTED) {
+      // First time!
+      printWifiStatus();                        // you're connected now, so print out the status
+      last_wifi_status = wifi_status;
+    }
+    WiFiClient client = server.accept();   // listen for incoming clients
+
+    if (client) {                             // if you get a client,
+      Serial.println("new client");           // print a message out the serial port
+      String currentLine = "";                // make a String to hold incoming data from the client
+      while (client.connected()) {            // loop while the client's connected
+        if (client.available()) {             // if there's bytes to read from the client,
+          char c = client.read();             // read a byte, then
+          Serial.write(c);                    // print it out to the serial monitor
+          if (c == '\n') {                    // if the byte is a newline character
+
+            // if the current line is blank, you got two newline characters in a row.
+            // that's the end of the client HTTP request, so send a response:
+            if (currentLine.length() == 0) {
+              // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
+              // and a content-type so the client knows what's coming, then a blank line:
+              client.println("HTTP/1.1 200 OK");
+              client.println("Content-type:text/html");
+              client.println();
+
+              // the content of the HTTP response follows the header:
+              client.print("Click <a href=\"/H\">here</a> turn the LED on<br>");
+              client.print("Click <a href=\"/L\">here</a> turn the LED off<br>");
+
+              // The HTTP response ends with another blank line:
+              client.println();
+              // break out of the while loop:
+              break;
+            } else {    // if you got a newline, then clear currentLine:
+              currentLine = "";
+            }
+          } else if (c != '\r') {  // if you got anything else but a carriage return character,
+            currentLine += c;      // add it to the end of the currentLine
+          }
+
+          // Check to see if the client request was "GET /H" or "GET /L":
+          if (currentLine.endsWith("GET /H")) {
+            digitalWrite(LED_BUILTIN, HIGH);               // GET /H turns the LED on
+          }
+          if (currentLine.endsWith("GET /L")) {
+            digitalWrite(LED_BUILTIN, LOW);                // GET /L turns the LED off
+          }
+        }
+      }
+      // close the connection:
+      client.stop();
+      Serial.println("client disconnected");
+    }
+  }
   // Check for serial data
   while (Serial1.available() > 0) {
     int in = Serial1.read();
@@ -292,7 +383,6 @@ void loop()
         break;
     }
   }  
-  lv_timer_handler();
 // Send Rcu_On command if nothing received for over ten seconds.
   unsigned long now = millis();
   if (now - last_rcu >= interval)
@@ -302,6 +392,8 @@ void loop()
     //Serial1.begin(9600);
     send_command({Rcu_On});
     last_rcu=now;
+    progress++;
+    lv_bar_set_value(ui_startupBar, progress, LV_ANIM_ON);
   }
 }
 
@@ -374,32 +466,33 @@ void process_packet()
             lv_obj_remove_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN);
 
-            const char *type1=NULL;
-            const char *type2=NULL;
-
             uint8_t s0 = packet_in.setup[0] & 0x0F;
             uint8_t s1 = packet_in.setup[1] & 0x0F;
             uint8_t s3 = packet_in.setup[3] & 0x0F;
-            uint8_t s4 = packet_in.setup[3] & 0x0F;
+            uint8_t s4 = packet_in.setup[4] & 0x0F;
 
-            if ((s0 == 0x01)) {
-                type1 = cat_icom[s1];  
-            } else if ((s0 == 0x03)) {
-                type1 = cat_yaesu[s1]; 
-            } else if ((s0 == 0x04)) {
-                type1 = cat_tentec[s1]; 
-            } else {
-                lv_obj_add_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN);
+            // clamp
+            if (s0 >= COUNT_OF(cats))      s0 = 0;
+            if (s3 >= COUNT_OF(cats))      s3 = 0;
+            if (s1 >= COUNT_OF(cat_icom))  s1 = 0;
+            if (s4 >= COUNT_OF(cat_icom))  s4 = 0;  // or use appropriate array for the path
+
+            // Now select
+            const char *type1 = nullptr;
+            const char *type2 = nullptr;
+
+            switch (s0) {
+              case 0x01: type1 = cat_icom[s1];  break;
+              case 0x03: type1 = cat_yaesu[s1]; break;
+              case 0x04: type1 = cat_tentec[s1]; break;
+              default:   lv_obj_add_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN); break;
             }
 
-            if ((s3 == 0x01)) {
-                type2 = cat_icom[s4];
-            } else if ((s3 == 0x03)) {
-                type2 = cat_yaesu[s4];
-            } else if ((s3 == 0x04)) {
-                type2 = cat_tentec[s4];
-            } else {
-                lv_obj_add_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN);
+            switch (s3) {
+              case 0x01: type2 = cat_icom[s4];  break;
+              case 0x03: type2 = cat_yaesu[s4]; break;
+              case 0x04: type2 = cat_tentec[s4]; break;
+              default:   lv_obj_add_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN); break;
             }
 
             lv_label_set_text_fmt(ui_catStatus1, " CAT: %s", cats[s0]);
@@ -540,8 +633,16 @@ void process_packet()
           // and in each other setup bit 7 shows the current selected ant.
           // This does not appear to be the case, as setup[0] goes up to 20!
           uint8_t index = packet_in.setup[0];
+          if (index > 20) index = 20;  // clamp to last valid
+
           uint8_t idx = index / 2;
+          if (idx >= COUNT_OF(ant_messages)) idx = COUNT_OF(ant_messages) - 1;
+
           uint8_t ord = index % 2;
+          if (ord >= COUNT_OF(ordinals)) ord = 0; // safety
+
+          uint8_t raw = (packet_in.setup[idx+1] >> (ord*4)) & 0x07;
+          if (raw >= COUNT_OF(ant_num)) raw = COUNT_OF(ant_num) - 1;
 
           lv_label_set_text_fmt(ui_setupAntFooterText,ant_messages[idx],ordinals[ord]); 
           if (index < 20) // Don't change label of SAVE!     
@@ -619,18 +720,29 @@ void process_packet()
       // No point updating any other ui elements unless they have actually changed since the last update.
 
       // Standby/Operate screen data
+
+      int8_t band_idx = (packet_in.band_input >> 4) & 0x0f;
+      int8_t input_idx = (packet_in.band_input) & 0x01;
+      int8_t ants_idx = (packet_in.antenna_cat) & 0x07;
+      int8_t cat_idx = (packet_in.antenna_cat >> 4) & 0x07;
+      int8_t out_idx = (packet_in.flags >> 4) & 0x01;
+      if (band_idx >= COUNT_OF(bands) || input_idx >= COUNT_OF(inputs) || ants_idx >= COUNT_OF(antennas) || cat_idx >= COUNT_OF(cats) || out_idx >= COUNT_OF(outs)) {
+            Serial.println("Value exceeds allowed number, aborting update..");
+            return;
+      }
+    
       if (last_status.band_input != packet_in.band_input) {
-        lv_label_set_text_fmt(ui_inLabel,"IN\n%s",inputs[packet_in.band_input & 0x01]);      
-        lv_label_set_text_fmt(ui_bandLabel,"BAND\n%s",bands[(packet_in.band_input >> 4) & 0x0f]);      
+        lv_label_set_text_fmt(ui_bandLabel, "BAND\n%s", bands[band_idx]);
+        lv_label_set_text_fmt(ui_inLabel,"IN\n%s",inputs[input_idx]);      
       }
 
       if (last_status.antenna_cat != packet_in.antenna_cat) {
-        lv_label_set_text_fmt(ui_antLabel,"ANT\n%s",antennas[packet_in.antenna_cat & 0x07]); // only 3 bits
-        lv_label_set_text_fmt(ui_catLabel,"CAT\n%s",cats[(packet_in.antenna_cat >> 4) & 0x07]); // only 3 bits     
+        lv_label_set_text_fmt(ui_antLabel,"ANT\n%s",antennas[ants_idx]); // only 3 bits
+        lv_label_set_text_fmt(ui_catLabel,"CAT\n%s",cats[cat_idx]); // only 3 bits     
       }
 
       if (last_status.flags != packet_in.flags) {
-        lv_label_set_text_fmt(ui_outLabel,"OUT\n%s",outs[(packet_in.flags >> 4) & 0x01]);      
+        lv_label_set_text_fmt(ui_outLabel,"OUT\n%s",outs[out_idx]);      
       }
 
       if (last_status.power != packet_in.power) {
@@ -792,4 +904,24 @@ void button_pressed(lv_event_t * e)
     else if (obj == ui_buttonOperate)
       send_command({Key_On,Operate_Key});
   }
+}
+
+void printWifiStatus() {
+  // print the SSID of the network you're attached to:
+  Serial.print("SSID: ");
+  Serial.println(WiFi.SSID());
+
+  // print your board's IP address:
+  IPAddress ip = WiFi.localIP();
+  Serial.print("IP Address: ");
+  Serial.println(ip);
+
+  // print the received signal strength:
+  long rssi = WiFi.RSSI();
+  Serial.print("signal strength (RSSI):");
+  Serial.print(rssi);
+  Serial.println(" dBm");
+  // print where to go in a browser:
+  Serial.print("To see this page in action, open a browser to http://");
+  Serial.println(ip);
 }
