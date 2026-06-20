@@ -1,0 +1,4 @@
+.pio/
+.pio-core/
+.codex_tmp/
+tools/generated/

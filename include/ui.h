@@ -1,0 +1,64 @@
+/*
+ * Top-level LVGL UI declarations, screen globals, fonts, images, and UI initialisation entry point.
+ *
+ * Copyright (C) 2026 Phil Taylor (M0VSE)
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+
+#ifndef _SPE_EXPERT1K_UI_H
+#define _SPE_EXPERT1K_UI_H
+
+#if defined __has_include
+#if __has_include("lvgl.h")
+#include "lvgl.h"
+#elif __has_include("lvgl/lvgl.h")
+#include "lvgl/lvgl.h"
+#else
+#include "lvgl.h"
+#endif
+#else
+#include "lvgl.h"
+#endif
+
+#ifdef __cplusplus
+inline void lv_obj_add_flag(lv_obj_t * obj, int flags)
+{
+    lv_obj_add_flag(obj, static_cast<lv_obj_flag_t>(flags));
+}
+
+inline void lv_obj_remove_flag(lv_obj_t * obj, int flags)
+{
+    lv_obj_remove_flag(obj, static_cast<lv_obj_flag_t>(flags));
+}
+#endif
+
+#include "ui_helpers.h"
+#include "ui_comp.h"
+#include "ui_comp_hook.h"
+#include "ui_events.h"
+
+///////////////////// SCREENS ////////////////////
+
+#include "ui_bootScreen.h"
+#include "ui_mainScreen.h"
+
+///////////////////// VARIABLES ////////////////////
+
+
+// EVENTS
+
+extern lv_obj_t * ui____initial_actions0;
+
+// IMAGES AND IMAGE SETS
+LV_IMG_DECLARE(ui_img_spe_png);    // assets/spe.png
+
+// FONTS
+LV_FONT_DECLARE(ui_font_Helvetica_28);
+LV_FONT_DECLARE(ui_font_LCD);
+
+// UI INIT
+void ui_init(void);
+void ui_destroy(void);
+
+#endif
