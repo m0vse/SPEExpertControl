@@ -253,11 +253,13 @@ ExpertScreen screen = BootMessage;
 Expert_Packet last_status;
 unsigned long last_rcu=0;
 const unsigned long interval = 1000;
-bool hold = false;
+const unsigned long cat_display_hold_ms = 6000;
 bool touch_ready = false;
 bool amp_status_valid = false;
 static bool amp_dtr_asserted = false;
 static bool amp_remote_update_enabled = true;
+static Expert_Packet web_cat_snapshot{};
+static unsigned long web_cat_snapshot_until = 0;
 int transformed_touch_devices = 0;
 unsigned long last_console_status = 0;
 static char console_line[96];
@@ -557,40 +559,44 @@ static void json_print_string(Print &out, const char *value)
 
 void app_status_print_json(Print &out)
 {
+  const bool show_cat_snapshot = amp_status_valid && screen == Cat_Screen && web_cat_snapshot_until != 0;
+  const Expert_Packet &status = show_cat_snapshot ? web_cat_snapshot : last_status;
+  const ExpertScreen status_screen = show_cat_snapshot ? Cat_Screen : screen;
+
   out.print(F("{\"valid\":"));
   out.print(amp_status_valid ? F("true") : F("false"));
   out.print(F(",\"screen\":"));
-  out.print(static_cast<int>(screen));
+  out.print(static_cast<int>(status_screen));
   out.print(F(",\"screenName\":"));
-  json_print_string(out, screen_name(screen));
+  json_print_string(out, screen_name(status_screen));
 
   if (!amp_status_valid) {
     out.print(F("}"));
     return;
   }
 
-  const uint8_t band_idx = (last_status.band_input >> 4) & 0x0f;
-  const uint8_t input_idx = last_status.band_input & 0x01;
-  const uint8_t ants_idx = last_status.antenna_cat & 0x07;
-  const uint8_t cat_idx = (last_status.antenna_cat >> 4) & 0x07;
-  const uint8_t out_idx = (last_status.flags >> 4) & 0x01;
-  const bool current_mode = ((last_status.flags >> 2) & 0x01) != 0;
-  const bool swr_alarm = ((last_status.flags >> 3) & 0x01) != 0;
+  const uint8_t band_idx = (status.band_input >> 4) & 0x0f;
+  const uint8_t input_idx = status.band_input & 0x01;
+  const uint8_t ants_idx = status.antenna_cat & 0x07;
+  const uint8_t cat_idx = (status.antenna_cat >> 4) & 0x07;
+  const uint8_t out_idx = (status.flags >> 4) & 0x01;
+  const bool current_mode = ((status.flags >> 2) & 0x01) != 0;
+  const bool swr_alarm = ((status.flags >> 3) & 0x01) != 0;
 
   out.print(F(",\"flags\":"));
-  out.print(last_status.flags);
+  out.print(status.flags);
   out.print(F(",\"displayCtx\":"));
-  out.print(last_status.display_ctx);
+  out.print(status.display_ctx);
   out.print(F(",\"freq\":"));
-  out.print(last_status.freq);
+  out.print(status.freq);
   out.print(F(",\"subBand\":"));
-  out.print(last_status.sub_band);
+  out.print(status.sub_band);
   out.print(F(",\"setup\":["));
-  for (uint8_t i = 0; i < COUNT_OF(last_status.setup); ++i) {
+  for (uint8_t i = 0; i < COUNT_OF(status.setup); ++i) {
     if (i) {
       out.print(',');
     }
-    out.print(last_status.setup[i]);
+    out.print(status.setup[i]);
   }
   out.print(']');
   out.print(F(",\"input\":"));
@@ -604,25 +610,25 @@ void app_status_print_json(Print &out)
   out.print(F(",\"out\":"));
   json_print_string(out, out_idx < COUNT_OF(outs) ? outs[out_idx] : "?");
   out.print(F(",\"power\":"));
-  out.print(float(last_status.power) / 10.0f, 1);
+  out.print(float(status.power) / 10.0f, 1);
   out.print(F(",\"reverse\":"));
-  out.print(float(last_status.rev_power) / 10.0f, 1);
+  out.print(float(status.rev_power) / 10.0f, 1);
   out.print(F(",\"swr\":"));
   if (swr_alarm) {
     json_print_string(out, "--.--");
   } else {
     char swr[8];
-    snprintf(swr, sizeof(swr), "%.2f", float(last_status.swr_gain) / 100.0f);
+    snprintf(swr, sizeof(swr), "%.2f", float(status.swr_gain) / 100.0f);
     json_print_string(out, swr);
   }
   out.print(F(",\"temp\":"));
   char temp[12];
-  snprintf(temp, sizeof(temp), "%d%s", last_status.temp, tscales[(last_status.flags >> 7) & 0x01]);
+  snprintf(temp, sizeof(temp), "%d%s", status.temp, tscales[(status.flags >> 7) & 0x01]);
   json_print_string(out, temp);
   out.print(F(",\"voltage\":"));
-  out.print(float(last_status.voltage) / 10.0f, 1);
+  out.print(float(status.voltage) / 10.0f, 1);
   out.print(F(",\"current\":"));
-  out.print(current_mode ? float(last_status.voltage) / 10.0f : float(last_status.current) / 10.0f, 1);
+  out.print(current_mode ? float(status.voltage) / 10.0f : float(status.current) / 10.0f, 1);
   out.print(F("}"));
 }
 
@@ -1095,15 +1101,19 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
         lv_disp_load_scr(ui_mainScreen);
     }
 
-    // Only upate if packet has changed
-    if (memcmp(&last_status,&packet_in,sizeof last_status))
+    // Select current screen
+    // Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,UnusedA,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
+    // Set_BaudRate,Manual_Tune,Backlight,UnusedB,UnusedC,Alarm_History,Shutdown
+    ExpertScreen scr = static_cast<ExpertScreen>(packet_in.display_ctx);
+    const unsigned long now = millis();
+    const bool cat_hold_expired = screen == Cat_Screen && scr != Cat_Screen && now >= web_cat_snapshot_until;
+
+    // Only update if the packet changed, or if a transient CAT screen has timed out.
+    if (memcmp(&last_status,&packet_in,sizeof last_status) || cat_hold_expired)
     {
-      // Select current screen
-      // Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,UnusedA,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
-      // Set_BaudRate,Manual_Tune,Backlight,UnusedB,UnusedC,Alarm_History,Shutdown
-      ExpertScreen scr = static_cast<ExpertScreen>(packet_in.display_ctx);
-      
-      if ((screen != scr || packet_in.flags != last_status.flags) && !hold ) {
+      const bool holding_cat_screen = screen == Cat_Screen && scr != Cat_Screen && now < web_cat_snapshot_until;
+
+      if (!holding_cat_screen && (screen != scr || packet_in.flags != last_status.flags || cat_hold_expired)) {
         // Screen has changed, so lets display it, hide everything first.
         // Need to tidy this, probably create an array of all screen objects?
         lv_obj_add_flag(ui_receive, LV_OBJ_FLAG_HIDDEN); 
@@ -1139,7 +1149,8 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
             break;
           case Cat_Screen:
           {
-            hold=true;
+            web_cat_snapshot = packet_in;
+            web_cat_snapshot_until = now + cat_display_hold_ms;
             lv_obj_remove_flag(ui_catStatus, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN);
@@ -1271,6 +1282,9 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
           break;
         }
         screen = scr;
+        if (scr != Cat_Screen) {
+          web_cat_snapshot_until = 0;
+        }
         // If screen has changed, last_status is now invalid;
         memset(&last_status,0xff,sizeof last_status);
       }
@@ -1553,7 +1567,6 @@ Ant_Key=0x2B,Cat_Key=0x2C,Left_Key=0x2D,Right_Key=0x2E,Set_Key=0x2F,Off_Key=0x18
 
 void button_pressed(lv_event_t * e)
 {
-  hold = false;
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_current_target_obj(e);
   if(code == LV_EVENT_CLICKED || code == LV_EVENT_LONG_PRESSED_REPEAT) {
