@@ -23,18 +23,20 @@ Recommended Arduino Giga wiring:
 
 | Arduino Giga | MAX3232 side | Amplifier D-type | Purpose |
 | --- | --- | --- | --- |
+| `3V3` | `VCC` | - | MAX3232 module power |
+| `GND` | `GND` | DB-9 pin 5 | Common signal ground |
 | `Serial1 TX` | `T1IN` | Amplifier RXD | Command/status UART transmit |
 | `Serial1 RX` | `R1OUT` | Amplifier TXD | Command/status UART receive |
 | `D7` | `T2IN` | Amplifier DTR | Power-on / remote wake request |
-| `GND` | `GND` | Signal ground | Common reference |
 
 The MAX3232 outputs should connect to the amplifier side of the D-type socket:
 
-| MAX3232 RS-232 side | Amplifier D-type | Purpose |
+| MAX3232 RS-232 side | Amplifier DB-9 pin | Purpose |
 | --- | --- | --- |
-| `T1OUT` | Amplifier RXD | UART data from controller to amplifier |
-| `R1IN` | Amplifier TXD | UART data from amplifier to controller |
-| `T2OUT` | Amplifier DTR | DTR asserted by controller |
+| `T1OUT` | Pin 3, RXD | UART data from controller to amplifier |
+| `R1IN` | Pin 2, TXD | UART data from amplifier to controller |
+| `T2OUT` | Pin 4, DTR | DTR asserted by controller |
+| `GND` | Pin 5, GND | Common signal ground |
 
 `D7` is assigned as `SPE_AMP_DTR_PIN`. The firmware asserts DTR during controller startup to request remote power-on. When the OFF button command is sent, the firmware sends `RCU_OFF`, releases DTR, and stops the periodic `RCU_ON` polling so the amplifier can power down. Pressing ON asserts DTR again and restarts remote console updates.
 
