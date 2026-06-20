@@ -17,7 +17,7 @@ The project provides a local LVGL touch interface, serial control of the amplifi
 
 ### Enclosure
 
-The tested enclosure is the Amazon UK case listed as ASIN [`B0CTMX2Z46`](https://www.amazon.co.uk/dp/B0CTMX2Z46/). It fits the controller well; the only required mechanical change is a hole in the perspex back panel for the amplifier DB-9 connector.
+The tested enclosure is the KKSB Cases KKSB Case with Adjustable Stand for Arduino GIGA WiFi and Arduino GIGA Display Shield, listed on Amazon UK as ASIN [`B0CTMX2Z46`](https://www.amazon.co.uk/dp/B0CTMX2Z46/). It fits the controller well; the only required mechanical change is a hole in the perspex back panel for the amplifier DB-9 connector.
 
 <img src="https://m.media-amazon.com/images/I/61t7FyWMJ3L._AC_SL1500_.jpg" alt="tested enclosure" width="360">
 
