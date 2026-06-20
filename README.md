@@ -19,7 +19,7 @@ The project provides a local LVGL touch interface, serial control of the amplifi
 
 The tested enclosure is the Amazon UK case listed as ASIN [`B0CTMX2Z46`](https://www.amazon.co.uk/dp/B0CTMX2Z46/). It fits the controller well; the only required mechanical change is a hole in the perspex back panel for the amplifier DB-9 connector.
 
-![tested enclosure](https://m.media-amazon.com/images/I/61t7FyWMJ3L._AC_SL1500_.jpg)
+<img src="https://m.media-amazon.com/images/I/61t7FyWMJ3L._AC_SL1500_.jpg" alt="tested enclosure" width="360">
 
 ### Amplifier RS-232 Wiring
 
