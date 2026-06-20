@@ -19,6 +19,8 @@ The project provides a local LVGL touch interface, serial control of the amplifi
 
 The tested enclosure is the Amazon UK case listed as ASIN [`B0CTMX2Z46`](https://www.amazon.co.uk/dp/B0CTMX2Z46/). It fits the controller well; the only required mechanical change is a hole in the perspex back panel for the amplifier DB-9 connector.
 
+![tested enclosure](https://m.media-amazon.com/images/I/61t7FyWMJ3L._AC_SL1500_.jpg)
+
 ### Amplifier RS-232 Wiring
 
 The amplifier serial port uses RS-232 voltage levels. Use a two-channel MAX3232 board so the normal UART and the DTR power-on signal are both level shifted.
