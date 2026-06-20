@@ -15,6 +15,10 @@ The project provides a local LVGL touch interface, serial control of the amplifi
 - Two-channel MAX3232 level shifter connected to the first UART and amplifier DTR
 - SPE Expert 1K-FA amplifier
 
+### Enclosure
+
+The tested enclosure is the Amazon UK case listed as ASIN [`B0CTMX2Z46`](https://www.amazon.co.uk/dp/B0CTMX2Z46/). It fits the controller well; the only required mechanical change is a hole in the perspex back panel for the amplifier DB-9 connector.
+
 ### Amplifier RS-232 Wiring
 
 The amplifier serial port uses RS-232 voltage levels. Use a two-channel MAX3232 board so the normal UART and the DTR power-on signal are both level shifted.
