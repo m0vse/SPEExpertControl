@@ -12,8 +12,33 @@ The project provides a local LVGL touch interface, serial control of the amplifi
 
 - Arduino Giga R1, M7 core
 - Arduino Giga Display Shield
-- MAX3232 level shifter connected to the first UART for amplifier serial communication
+- Two-channel MAX3232 level shifter connected to the first UART and amplifier DTR
 - SPE Expert 1K-FA amplifier
+
+### Amplifier RS-232 Wiring
+
+The amplifier serial port uses RS-232 voltage levels. Use a two-channel MAX3232 board so the normal UART and the DTR power-on signal are both level shifted.
+
+Recommended Arduino Giga wiring:
+
+| Arduino Giga | MAX3232 side | Amplifier D-type | Purpose |
+| --- | --- | --- | --- |
+| `Serial1 TX` | `T1IN` | Amplifier RXD | Command/status UART transmit |
+| `Serial1 RX` | `R1OUT` | Amplifier TXD | Command/status UART receive |
+| `D7` | `T2IN` | Amplifier DTR | Power-on / remote wake request |
+| `GND` | `GND` | Signal ground | Common reference |
+
+The MAX3232 outputs should connect to the amplifier side of the D-type socket:
+
+| MAX3232 RS-232 side | Amplifier D-type | Purpose |
+| --- | --- | --- |
+| `T1OUT` | Amplifier RXD | UART data from controller to amplifier |
+| `R1IN` | Amplifier TXD | UART data from amplifier to controller |
+| `T2OUT` | Amplifier DTR | DTR asserted by controller |
+
+`D7` is assigned as `SPE_AMP_DTR_PIN`. The firmware asserts DTR during controller startup to request remote power-on. When the OFF button command is sent, the firmware sends `RCU_OFF`, releases DTR, and stops the periodic `RCU_ON` polling so the amplifier can power down. Pressing ON asserts DTR again and restarts remote console updates.
+
+Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7` low to assert RS-232 DTR. If the wiring is moved later, change `SPE_AMP_DTR_PIN` in [src/main.cpp](src/main.cpp).
 
 ## Current Features
 
@@ -26,6 +51,7 @@ The project provides a local LVGL touch interface, serial control of the amplifi
 - Hidden WiFi setup popup opened from the top-left of the display
 - Background WiFi reconnect using saved credentials
 - Serial console commands for WiFi, amplifier status, scans, and diagnostics
+- DTR power-on output for waking the amplifier when it is switched off
 - Web UI that mirrors the LCD screens and sends the same amplifier button commands
 - Separate PlatformIO environment for refreshing the Arduino Giga WiFi firmware
 
@@ -70,6 +96,7 @@ Useful commands:
 - `amp` - print the last amplifier status packet
 - `scan` - run a blocking WiFi scan and print results
 - `rcu` - send `RCU_ON` to the amplifier
+- `dtr` - print the configured amplifier DTR output pin and GPIO level
 - `wifi-popup` - open the hidden WiFi setup popup
 - `wifi-saved` - show whether saved WiFi credentials exist
 - `wifi-clear` - clear saved WiFi credentials

@@ -44,6 +44,14 @@ using namespace std::chrono_literals;
 #define SPE_VERBOSE_PACKET_LOG 0
 #endif
 
+#ifndef SPE_AMP_DTR_PIN
+#define SPE_AMP_DTR_PIN 7
+#endif
+
+#ifndef SPE_AMP_DTR_ASSERTED_LEVEL
+#define SPE_AMP_DTR_ASSERTED_LEVEL LOW
+#endif
+
 uint8_t progress = 0;
 
 #define COUNT_OF(a) ((int)(sizeof(a) / sizeof((a)[0])))
@@ -248,6 +256,8 @@ const unsigned long interval = 1000;
 bool hold = false;
 bool touch_ready = false;
 bool amp_status_valid = false;
+static bool amp_dtr_asserted = false;
+static bool amp_remote_update_enabled = true;
 int transformed_touch_devices = 0;
 unsigned long last_console_status = 0;
 static char console_line[96];
@@ -339,6 +349,22 @@ private:
 
 static AmpSerialLink amp_serial;
 
+static void amp_dtr_set(bool asserted)
+{
+  if (asserted) {
+    digitalWrite(SPE_AMP_DTR_PIN, SPE_AMP_DTR_ASSERTED_LEVEL);
+  } else {
+    digitalWrite(SPE_AMP_DTR_PIN, SPE_AMP_DTR_ASSERTED_LEVEL == HIGH ? LOW : HIGH);
+  }
+  amp_dtr_asserted = asserted;
+}
+
+static void amp_dtr_begin()
+{
+  pinMode(SPE_AMP_DTR_PIN, OUTPUT);
+  amp_dtr_set(true);
+}
+
 static void boot_log(const __FlashStringHelper *message)
 {
   Serial.println(message);
@@ -418,6 +444,7 @@ static void print_console_help()
   Serial.println(F("  amp         Last amplifier status packet"));
   Serial.println(F("  scan        Blocking WiFi scan to serial"));
   Serial.println(F("  rcu         Send RCU_ON to the amplifier"));
+  Serial.println(F("  dtr         Show amplifier DTR output state"));
   Serial.println(F("  wifi-popup  Open WiFi popup on the display"));
   Serial.println(F("  wifi-saved  Show saved WiFi credential state"));
   Serial.println(F("  wifi-clear  Clear saved WiFi credentials"));
@@ -471,6 +498,12 @@ static void print_amp_status()
   Serial.println(F(")"));
   Serial.print(F("last_rcu_ms="));
   Serial.println(last_rcu);
+  Serial.print(F("dtr_pin=D"));
+  Serial.print(SPE_AMP_DTR_PIN);
+  Serial.print(F(" asserted="));
+  Serial.print(amp_dtr_asserted ? F("yes") : F("no"));
+  Serial.print(F(" gpio_level="));
+  Serial.println(digitalRead(SPE_AMP_DTR_PIN) == HIGH ? F("HIGH") : F("LOW"));
 
   if (!amp_status_valid) {
     Serial.println(F("No 30-byte amplifier status packet received yet"));
@@ -670,6 +703,14 @@ static void handle_console_command(char *line)
     print_wifi_scan();
   } else if (strcmp(line, "rcu") == 0) {
     send_command({Rcu_On});
+  } else if (strcmp(line, "dtr") == 0) {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Amp DTR pin=D"));
+    Serial.print(SPE_AMP_DTR_PIN);
+    Serial.print(F(" asserted="));
+    Serial.print(amp_dtr_asserted ? F("yes") : F("no"));
+    Serial.print(F(" gpio_level="));
+    Serial.println(digitalRead(SPE_AMP_DTR_PIN) == HIGH ? F("HIGH") : F("LOW"));
   } else if (strcmp(line, "wifi-popup") == 0) {
 #if SPE_ENABLE_WIFI_SETUP
     LvglLock lock;
@@ -780,6 +821,7 @@ void setup() {
   boot_led_set(LEDR, false);
   boot_led_set(LEDG, false);
   boot_led_set(LEDB, false);
+  amp_dtr_begin();
 
   while(!Serial && millis()<4000) {
     delay(10);
@@ -1001,7 +1043,7 @@ void serial_task()
 
 // Send Rcu_On command if nothing received for over ten seconds.
   unsigned long now = millis();
-  if (now - last_rcu >= interval)
+  if (amp_remote_update_enabled && now - last_rcu >= interval)
   {
     //Serial1.end();      // close serial port
     //delay(100);        //wait 100 millis
@@ -1028,12 +1070,16 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
     // This is a response packet
     //if (packet_in.status_code == 0x06)
     //Serial.println("ACK");
-    if (packet_in.status_code == 0x20) {
+    if (packet_in.status_code == 0x15) {
       DebugSerialLock debug_lock;
       Serial.println("NAK");
-    } else if (packet_in.status_code != 0x06) {
+    } else if (packet_in.status_code == 0xff) {
       DebugSerialLock debug_lock;
       Serial.println("UNK");
+    } else if (packet_in.status_code != 0x06) {
+      DebugSerialLock debug_lock;
+      Serial.print(F("Unexpected 1-byte response: 0x"));
+      Serial.println(packet_in.status_code, HEX);
     }
   } else if (len_in == 30) {
     // Show status
@@ -1438,7 +1484,21 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
 
 
 void send_command(std::initializer_list<uint8_t> cmd) {
+  const bool rcu_on = cmd.size() == 1 && *cmd.begin() == Rcu_On;
+  const bool off_key = cmd.size() == 2 && *cmd.begin() == Key_On && *(cmd.begin() + 1) == Off_Key;
+
+  if (rcu_on) {
+    amp_remote_update_enabled = true;
+    amp_dtr_set(true);
+  }
+
   amp_serial.send(cmd);
+
+  if (off_key) {
+    amp_serial.send({Rcu_Off});
+    amp_remote_update_enabled = false;
+    amp_dtr_set(false);
+  }
 }
 
 bool amp_control_press_key(const char *name)
