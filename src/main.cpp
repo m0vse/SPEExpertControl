@@ -267,6 +267,11 @@ static bool amp_dtr_asserted = false;
 static bool amp_remote_update_enabled = true;
 static Expert_Packet web_cat_snapshot{};
 static unsigned long web_cat_snapshot_until = 0;
+static bool published_amp_status_valid = false;
+static ExpertScreen published_screen = BootMessage;
+static Expert_Packet published_last_status{};
+static Expert_Packet published_web_cat_snapshot{};
+static unsigned long published_web_cat_snapshot_until = 0;
 int transformed_touch_devices = 0;
 unsigned long last_console_status = 0;
 static char console_line[96];
@@ -276,6 +281,7 @@ static bool console_last_was_line_end = false;
 static rtos::Mutex lvgl_mutex;
 static rtos::Mutex amp_serial_mutex;
 static rtos::Mutex debug_serial_mutex;
+static rtos::Mutex amp_status_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
 static rtos::Thread serial_thread(osPriorityNormal, 8192, nullptr, "amp");
 static rtos::Thread wifi_thread(osPriorityNormal, 8192, nullptr, "wifi");
@@ -297,6 +303,12 @@ class DebugSerialLock {
 public:
   DebugSerialLock() { debug_serial_mutex.lock(); }
   ~DebugSerialLock() { debug_serial_mutex.unlock(); }
+};
+
+class AmpStatusLock {
+public:
+  AmpStatusLock() { amp_status_mutex.lock(); }
+  ~AmpStatusLock() { amp_status_mutex.unlock(); }
 };
 
 class AmpSerialLink {
@@ -528,13 +540,23 @@ static void print_wifi_status()
 
 static void print_amp_status()
 {
+  bool status_valid = false;
+  ExpertScreen status_screen = BootMessage;
+  Expert_Packet status{};
+  {
+    AmpStatusLock status_lock;
+    status_valid = published_amp_status_valid;
+    status_screen = published_screen;
+    status = published_last_status;
+  }
+
   DebugSerialLock debug_lock;
   Serial.print(F("Amp status valid="));
-  Serial.println(amp_status_valid ? F("yes") : F("no"));
+  Serial.println(status_valid ? F("yes") : F("no"));
   Serial.print(F("screen="));
-  Serial.print(static_cast<int>(screen));
+  Serial.print(static_cast<int>(status_screen));
   Serial.print(F(" ("));
-  Serial.print(screen_name(screen));
+  Serial.print(screen_name(status_screen));
   Serial.println(F(")"));
   Serial.print(F("last_rcu_ms="));
   Serial.println(last_rcu);
@@ -545,16 +567,16 @@ static void print_amp_status()
   Serial.print(F(" gpio_level="));
   Serial.println(digitalRead(SPE_AMP_DTR_PIN) == HIGH ? F("HIGH") : F("LOW"));
 
-  if (!amp_status_valid) {
+  if (!status_valid) {
     Serial.println(F("No 30-byte amplifier status packet received yet"));
     return;
   }
 
-  const uint8_t band_idx = (last_status.band_input >> 4) & 0x0f;
-  const uint8_t input_idx = last_status.band_input & 0x01;
-  const uint8_t ant_idx = last_status.antenna_cat & 0x07;
-  const uint8_t cat_idx = (last_status.antenna_cat >> 4) & 0x07;
-  const uint8_t out_idx = (last_status.flags >> 4) & 0x01;
+  const uint8_t band_idx = (status.band_input >> 4) & 0x0f;
+  const uint8_t input_idx = status.band_input & 0x01;
+  const uint8_t ant_idx = status.antenna_cat & 0x07;
+  const uint8_t cat_idx = (status.antenna_cat >> 4) & 0x07;
+  const uint8_t out_idx = (status.flags >> 4) & 0x01;
 
   Serial.print(F("band="));
   Serial.print(band_idx < COUNT_OF(bands) ? bands[band_idx] : "?");
@@ -568,17 +590,17 @@ static void print_amp_status()
   Serial.println(out_idx < COUNT_OF(outs) ? outs[out_idx] : "?");
 
   Serial.print(F("power="));
-  Serial.print(float(last_status.power) / 10);
+  Serial.print(float(status.power) / 10);
   Serial.print(F("W rev="));
-  Serial.print(float(last_status.rev_power) / 10);
+  Serial.print(float(status.rev_power) / 10);
   Serial.print(F("W swr/gain="));
-  Serial.print(float(last_status.swr_gain) / 10);
+  Serial.print(float(status.swr_gain) / 10);
   Serial.print(F(" temp="));
-  Serial.print(last_status.temp);
+  Serial.print(status.temp);
   Serial.print(F(" voltage="));
-  Serial.print(float(last_status.voltage) / 10);
+  Serial.print(float(status.voltage) / 10);
   Serial.print(F(" current="));
-  Serial.println(float(last_status.current) / 10);
+  Serial.println(float(status.current) / 10);
 }
 
 static void json_print_string(Print &out, const char *value)
@@ -597,18 +619,28 @@ static void json_print_string(Print &out, const char *value)
 
 void app_status_print_json(Print &out)
 {
-  const bool show_cat_snapshot = amp_status_valid && screen == Cat_Screen && web_cat_snapshot_until != 0;
-  const Expert_Packet &status = show_cat_snapshot ? web_cat_snapshot : last_status;
-  const ExpertScreen status_screen = show_cat_snapshot ? Cat_Screen : screen;
+  bool status_valid = false;
+  ExpertScreen current_screen = BootMessage;
+  Expert_Packet status{};
+  {
+    AmpStatusLock status_lock;
+    status_valid = published_amp_status_valid;
+    current_screen = published_screen;
+    const bool show_cat_snapshot = status_valid && current_screen == Cat_Screen && published_web_cat_snapshot_until != 0;
+    status = show_cat_snapshot ? published_web_cat_snapshot : published_last_status;
+    if (show_cat_snapshot) {
+      current_screen = Cat_Screen;
+    }
+  }
 
   out.print(F("{\"valid\":"));
-  out.print(amp_status_valid ? F("true") : F("false"));
+  out.print(status_valid ? F("true") : F("false"));
   out.print(F(",\"screen\":"));
-  out.print(static_cast<int>(status_screen));
+  out.print(static_cast<int>(current_screen));
   out.print(F(",\"screenName\":"));
-  json_print_string(out, screen_name(status_screen));
+  json_print_string(out, screen_name(current_screen));
 
-  if (!amp_status_valid) {
+  if (!status_valid) {
     out.print(F("}"));
     return;
   }
@@ -672,6 +704,12 @@ void app_status_print_json(Print &out)
 
 static void print_controller_status()
 {
+  ExpertScreen status_screen = BootMessage;
+  {
+    AmpStatusLock status_lock;
+    status_screen = published_screen;
+  }
+
   DebugSerialLock debug_lock;
   Serial.print(F("Controller ms="));
   Serial.print(millis());
@@ -682,9 +720,9 @@ static void print_controller_status()
   Serial.print(F(" indev="));
   Serial.print(transformed_touch_devices);
   Serial.print(F(" screen="));
-  Serial.print(static_cast<int>(screen));
+  Serial.print(static_cast<int>(status_screen));
   Serial.print(F(" ("));
-  Serial.print(screen_name(screen));
+  Serial.print(screen_name(status_screen));
   Serial.println(F(")"));
 #if SPE_BRINGUP_LEVEL >= 5
   Serial.print(F("serial1_available="));
@@ -1224,6 +1262,16 @@ void web_task()
   }
 }
 
+static void publish_amp_status_snapshot()
+{
+  AmpStatusLock status_lock;
+  published_amp_status_valid = amp_status_valid;
+  published_screen = screen;
+  published_last_status = last_status;
+  published_web_cat_snapshot = web_cat_snapshot;
+  published_web_cat_snapshot_until = web_cat_snapshot_until;
+}
+
 void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
 {
   // We have a valid packet!
@@ -1647,6 +1695,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
       }
 #endif
       memcpy(&last_status,&packet_in,sizeof last_status);
+      publish_amp_status_snapshot();
     }
   }
 }
