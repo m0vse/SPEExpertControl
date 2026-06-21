@@ -9,6 +9,7 @@
 
 #include <Arduino.h>
 #include <Print.h>
+#include "models/amplifier_model.h"
 #include "models/spe_expert1k/expertpackets.h"
 #include "models/spe_expert1k/protocol.h"
 
@@ -18,6 +19,7 @@ struct AppStatusSnapshot {
     Expert_Packet status{};
     Expert_Packet web_cat_snapshot{};
     unsigned long web_cat_snapshot_until = 0;
+    AmpStatusSnapshot amp{};
     uint32_t sequence = 0;
 };
 

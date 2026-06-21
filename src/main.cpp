@@ -23,6 +23,7 @@
 #include "models/spe_expert1k/menuitems.h"
 #include "models/spe_expert1k/protocol.h"
 #include "models/spe_expert1k/serial_link.h"
+#include "models/spe_expert1k/status_adapter.h"
 #include "models/spe_expert1k/status_view.h"
 #include "serial/transport_stats.h"
 #include "ui/menu_control.h"
@@ -1089,6 +1090,7 @@ static void publish_amp_status_snapshot()
   snapshot.status = last_status;
   snapshot.web_cat_snapshot = web_cat_snapshot;
   snapshot.web_cat_snapshot_until = web_cat_snapshot_until;
+  snapshot.amp = spe_expert1k_make_status_snapshot(snapshot.valid, snapshot.screen, snapshot.status);
   app_status_publish(snapshot);
 }
 

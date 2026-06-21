@@ -1,0 +1,49 @@
+/*
+ * Model-neutral amplifier status types shared by UI, web, and future protocol implementations.
+ *
+ * Copyright (C) 2026 Phil Taylor (M0VSE)
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
+#pragma once
+
+#include <stdint.h>
+
+enum class AmpModelId : uint8_t {
+    Unknown = 0,
+    SpeExpert1k,
+    SpeModern
+};
+
+struct AmpMeterSnapshot {
+    const char *label = "";
+    float value = 0.0f;
+    uint16_t max = 0;
+    const char *suffix = "";
+    const char *scale[5] = {"", "", "", "", ""};
+};
+
+struct AmpStatusSnapshot {
+    bool valid = false;
+    AmpModelId model = AmpModelId::Unknown;
+    uint8_t screen_id = 0;
+    const char *screen_name = "unknown";
+    uint8_t flags = 0;
+    uint8_t display_context = 0;
+    uint8_t op_status = 0;
+    uint16_t frequency = 0;
+    uint8_t sub_band = 0;
+    const char *input = "?";
+    const char *band = "?";
+    const char *antenna = "?";
+    const char *cat = "?";
+    const char *out = "?";
+    char swr[8] = "--.--";
+    char temp[12] = "?";
+    float power = 0.0f;
+    float reverse = 0.0f;
+    float voltage = 0.0f;
+    float current = 0.0f;
+    AmpMeterSnapshot power_meter;
+    AmpMeterSnapshot pa_meter;
+};
