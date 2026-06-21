@@ -19,6 +19,7 @@
 #include <ui.h>
 #include "models/spe_expert1k/expertpackets.h"
 #include "models/spe_expert1k/menuitems.h"
+#include "models/spe_expert1k/status_view.h"
 #include "ui/menu_control.h"
 
 #if SPE_ENABLE_WEB_SERVER
@@ -1003,13 +1004,14 @@ void app_status_print_json(Print &out)
   const uint8_t cat_idx = (status.antenna_cat >> 4) & 0x07;
   const uint8_t out_idx = (status.flags >> 4) & 0x01;
   const bool swr_alarm = ((status.flags >> 3) & 0x01) != 0;
+  SpeStatusView status_view(status);
 
   out.print(F(",\"flags\":"));
   out.print(status.flags);
   out.print(F(",\"displayCtx\":"));
   out.print(status.display_ctx);
   out.print(F(",\"opStatus\":"));
-  out.print(status.display_ctx & 0x03);
+  out.print(status_view.op_status());
   out.print(F(",\"freq\":"));
   out.print(status.freq);
   out.print(F(",\"subBand\":"));
@@ -1052,6 +1054,38 @@ void app_status_print_json(Print &out)
   out.print(float(status.voltage) / 10.0f, 1);
   out.print(F(",\"current\":"));
   out.print(float(status.current) / 10.0f, 1);
+  out.print(F(",\"meterPowerLabel\":"));
+  json_print_string(out, status_view.power_label());
+  out.print(F(",\"meterPower\":"));
+  out.print(float(status_view.power_raw_tenths()) / 10.0f, 1);
+  out.print(F(",\"meterPowerMax\":"));
+  out.print(status_view.power_bar_max());
+  out.print(F(",\"meterPowerSuffix\":"));
+  json_print_string(out, status_view.power_value_suffix());
+  out.print(F(",\"meterPowerScale\":["));
+  for (uint8_t i = 0; i < 5; ++i) {
+    if (i) {
+      out.print(',');
+    }
+    json_print_string(out, status_view.power_scale_label(i));
+  }
+  out.print(']');
+  out.print(F(",\"meterPaLabel\":"));
+  json_print_string(out, status_view.pa_label());
+  out.print(F(",\"meterPa\":"));
+  out.print(float(status_view.pa_raw_tenths()) / 10.0f, 1);
+  out.print(F(",\"meterPaMax\":"));
+  out.print(status_view.pa_bar_max());
+  out.print(F(",\"meterPaSuffix\":"));
+  json_print_string(out, status_view.pa_value_suffix());
+  out.print(F(",\"meterPaScale\":["));
+  for (uint8_t i = 0; i < 5; ++i) {
+    if (i) {
+      out.print(',');
+    }
+    json_print_string(out, status_view.pa_scale_label(i));
+  }
+  out.print(']');
   out.print(F("}"));
 }
 
@@ -1121,25 +1155,16 @@ static void ensure_transmit_scale_labels()
   }
 }
 
-static void configure_transmit_meters(uint8_t op_status, uint8_t out_idx)
+static void configure_transmit_meters(const SpeStatusView &status)
 {
-  const bool full_power = out_idx != 0;
-  const bool show_output_current = op_status == 1;
-
   ensure_transmit_scale_labels();
-  lv_label_set_text(ui_powerLabel, show_output_current ? "PW OUT" : "PW REV");
-  lv_label_set_text(ui_vPALabel, show_output_current ? "  I PA" : "V PA");
-  lv_bar_set_range(ui_powerBar, 0, full_power ? 1200 : 600);
-  lv_bar_set_range(ui_vBar, 0, (!show_output_current && full_power) ? 60 : 50);
-  static const char * const full_power_scale[5] = {"0", "300", "600", "900", "1200"};
-  static const char * const half_power_scale[5] = {"0", "150", "300", "450", "600"};
-  static const char * const pa_50_scale[5] = {"0", "12.5", "25", "37.5", "50"};
-  static const char * const v_60_scale[5] = {"0", "15", "30", "45", "60"};
-  const char * const *power_scale = full_power ? full_power_scale : half_power_scale;
-  const char * const *pa_scale = (!show_output_current && full_power) ? v_60_scale : pa_50_scale;
+  lv_label_set_text(ui_powerLabel, status.power_label());
+  lv_label_set_text(ui_vPALabel, status.pa_label());
+  lv_bar_set_range(ui_powerBar, 0, status.power_bar_max());
+  lv_bar_set_range(ui_vBar, 0, status.pa_bar_max());
   for (uint8_t i = 0; i < 5; ++i) {
-    lv_label_set_text(ui_powerScaleLabels[i], power_scale[i]);
-    lv_label_set_text(ui_paScaleLabels[i], pa_scale[i]);
+    lv_label_set_text(ui_powerScaleLabels[i], status.power_scale_label(i));
+    lv_label_set_text(ui_paScaleLabels[i], status.pa_scale_label(i));
   }
 }
 
@@ -1787,6 +1812,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
     // Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,UnusedA,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
     // Set_BaudRate,Manual_Tune,Backlight,UnusedB,UnusedC,Alarm_History,Shutdown
     ExpertScreen scr = static_cast<ExpertScreen>(packet_in.display_ctx);
+    SpeStatusView packet_status(packet_in);
     const unsigned long now = millis();
     const bool cat_hold_expired = screen == Cat_Screen && scr != Cat_Screen && now >= web_cat_snapshot_until;
 
@@ -1821,7 +1847,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
             if ((packet_in.flags >> 2) & 0x01) {
               // TX mode
               lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
-              configure_transmit_meters(packet_in.display_ctx & 0x03, (packet_in.flags >> 4) & 0x01);
+              configure_transmit_meters(packet_status);
               lv_obj_add_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
             } else {
               lv_obj_remove_flag(ui_receive, LV_OBJ_FLAG_HIDDEN);
@@ -1887,7 +1913,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
             lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
-            configure_transmit_meters(packet_in.display_ctx & 0x03, (packet_in.flags >> 4) & 0x01);
+            configure_transmit_meters(packet_status);
             break;
           case Alarm_History:
             lv_obj_remove_flag(ui_alarmHistory, LV_OBJ_FLAG_HIDDEN);
@@ -2112,9 +2138,8 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
             return;
       }
 
-      const uint8_t op_status = packet_in.display_ctx & 0x03;
       if (scr == Operate_RX || scr == Operate_TX || (((packet_in.flags >> 2) & 0x01) != 0 && scr == Receive_Screen)) {
-        configure_transmit_meters(op_status, out_idx);
+        configure_transmit_meters(packet_status);
       }
     
       if (last_status.band_input != packet_in.band_input) {
@@ -2131,23 +2156,15 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
         lv_label_set_text_fmt(ui_outLabel,"OUT\n%s",outs[out_idx]);      
       }
 
-      const bool show_output_current = op_status == 1;
-      const uint16_t power_raw = show_output_current ? packet_in.power : packet_in.rev_power;
-      const uint16_t last_power_raw = show_output_current ? last_status.power : last_status.rev_power;
-      if (last_power_raw != power_raw) {
-        lv_label_set_text_fmt(ui_pep, "%*.1f W pep", 6, float(power_raw)/10.0);
-        lv_bar_set_value(ui_powerBar, power_raw/10, LV_ANIM_ON);
+      SpeStatusView previous_status(last_status);
+      if (previous_status.power_raw_tenths() != packet_status.power_raw_tenths()) {
+        lv_label_set_text_fmt(ui_pep, "%*.1f%s", 6, float(packet_status.power_raw_tenths()) / 10.0, packet_status.power_value_suffix());
+        lv_bar_set_value(ui_powerBar, packet_status.power_bar_value(), LV_ANIM_ON);
       }
 
-      const uint16_t pa_raw = show_output_current ? packet_in.current : packet_in.voltage;
-      const uint16_t last_pa_raw = show_output_current ? last_status.current : last_status.voltage;
-      if (last_pa_raw != pa_raw) {
-        if (show_output_current) {
-          lv_label_set_text_fmt(ui_vPA,"%*.1f A",4,float(pa_raw)/10.0);      
-        } else {
-          lv_label_set_text_fmt(ui_vPA,"%*.1f V",4,float(pa_raw)/10.0);      
-        }
-        lv_bar_set_value(ui_vBar, pa_raw/10, LV_ANIM_ON);
+      if (previous_status.pa_raw_tenths() != packet_status.pa_raw_tenths()) {
+        lv_label_set_text_fmt(ui_vPA, "%*.1f%s", 4, float(packet_status.pa_raw_tenths()) / 10.0, packet_status.pa_value_suffix());
+        lv_bar_set_value(ui_vBar, packet_status.pa_bar_value(), LV_ANIM_ON);
       }
 
       if (last_status.swr_gain != packet_in.swr_gain) {
