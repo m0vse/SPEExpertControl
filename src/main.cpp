@@ -24,6 +24,10 @@
 #include "network/control_server.h"
 #endif
 
+#if SPE_ENABLE_WIFI_SETUP || SPE_ENABLE_WEB_SERVER
+#include "network/wifi_lock.h"
+#endif
+
 #if SPE_ENABLE_WIFI_SETUP
 #include "ui/wifi_setup.h"
 #endif
@@ -463,34 +467,61 @@ static void print_console_help()
 
 static void print_wifi_status()
 {
-  DebugSerialLock debug_lock;
 #if SPE_ENABLE_WIFI_SETUP || SPE_ENABLE_WEB_SERVER
-  const int status = WiFi.status();
+  int status = WL_IDLE_STATUS;
+  String firmware;
+  String ssid;
+  IPAddress ip;
+  long rssi = 0;
+  {
+    WifiStackLock wifi_lock;
+    status = WiFi.status();
+    firmware = WiFi.firmwareVersion();
+    if (status == WL_CONNECTED) {
+      ssid = WiFi.SSID();
+      ip = WiFi.localIP();
+      rssi = WiFi.RSSI();
+    }
+  }
+  const bool setup_connected =
+#if SPE_ENABLE_WIFI_SETUP
+    wifi_setup_is_connected();
+#else
+    false;
+#endif
+  const bool has_saved_credentials =
+#if SPE_ENABLE_WIFI_SETUP
+    wifi_setup_has_saved_credentials();
+#else
+    false;
+#endif
+  DebugSerialLock debug_lock;
   Serial.print(F("WiFi status="));
   Serial.print(status);
   Serial.print(F(" ("));
   Serial.print(wifi_status_name(status));
   Serial.println(F(")"));
   Serial.print(F("WiFi firmware="));
-  Serial.println(WiFi.firmwareVersion());
+  Serial.println(firmware);
   Serial.print(F("WiFi setup connected="));
 #if SPE_ENABLE_WIFI_SETUP
-  Serial.println(wifi_setup_is_connected() ? F("yes") : F("no"));
+  Serial.println(setup_connected ? F("yes") : F("no"));
   Serial.print(F("WiFi saved credentials="));
-  Serial.println(wifi_setup_has_saved_credentials() ? F("yes") : F("no"));
+  Serial.println(has_saved_credentials ? F("yes") : F("no"));
 #else
   Serial.println(F("n/a"));
 #endif
   if (status == WL_CONNECTED) {
     Serial.print(F("SSID="));
-    Serial.println(WiFi.SSID());
+    Serial.println(ssid);
     Serial.print(F("IP="));
-    Serial.println(WiFi.localIP());
+    Serial.println(ip);
     Serial.print(F("RSSI="));
-    Serial.print(WiFi.RSSI());
+    Serial.print(rssi);
     Serial.println(F(" dBm"));
   }
 #else
+  DebugSerialLock debug_lock;
   Serial.println(F("WiFi disabled at build time"));
 #endif
 }
@@ -668,19 +699,32 @@ static void print_wifi_scan()
     DebugSerialLock debug_lock;
     Serial.println(F("Starting blocking WiFi scan..."));
   }
-  const int networks = WiFi.scanNetworks();
+  int networks = 0;
+  {
+    WifiStackLock wifi_lock;
+    networks = WiFi.scanNetworks();
+  }
   {
     DebugSerialLock debug_lock;
     Serial.print(F("WiFi networks found="));
     Serial.println(networks);
     for (int i = 0; i < networks; ++i) {
+      String ssid;
+      long rssi = 0;
+      uint8_t encryption = 0;
+      {
+        WifiStackLock wifi_lock;
+        ssid = WiFi.SSID(i);
+        rssi = WiFi.RSSI(i);
+        encryption = WiFi.encryptionType(i);
+      }
       Serial.print(i);
       Serial.print(F(": "));
-      Serial.print(WiFi.SSID(i));
+      Serial.print(ssid);
       Serial.print(F(" RSSI="));
-      Serial.print(WiFi.RSSI(i));
+      Serial.print(rssi);
       Serial.print(F(" enc="));
-      Serial.println(WiFi.encryptionType(i));
+      Serial.println(encryption);
     }
   }
 #else
