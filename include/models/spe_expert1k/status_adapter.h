@@ -12,3 +12,8 @@
 #include "models/spe_expert1k/protocol.h"
 
 AmpStatusSnapshot spe_expert1k_make_status_snapshot(bool valid, ExpertScreen screen, const Expert_Packet &packet);
+void spe_expert1k_publish_app_status(bool valid,
+                                     ExpertScreen screen,
+                                     const Expert_Packet &status,
+                                     const Expert_Packet &web_cat_snapshot,
+                                     unsigned long web_cat_snapshot_until);

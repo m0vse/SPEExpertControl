@@ -7,6 +7,7 @@
 
 #include "models/spe_expert1k/status_adapter.h"
 
+#include "app_status.h"
 #include "models/spe_expert1k/status_view.h"
 #include <stdio.h>
 
@@ -77,4 +78,23 @@ AmpStatusSnapshot spe_expert1k_make_status_snapshot(bool valid, ExpertScreen scr
     }
 
     return snapshot;
+}
+
+void spe_expert1k_publish_app_status(bool valid,
+                                     ExpertScreen screen,
+                                     const Expert_Packet &status,
+                                     const Expert_Packet &web_cat_snapshot,
+                                     unsigned long web_cat_snapshot_until)
+{
+    AppStatusSnapshot snapshot;
+    snapshot.valid = valid;
+    snapshot.screen = screen;
+    snapshot.status = status;
+    snapshot.web_cat_snapshot = web_cat_snapshot;
+    snapshot.web_cat_snapshot_until = web_cat_snapshot_until;
+    snapshot.amp = spe_expert1k_make_status_snapshot(snapshot.valid, snapshot.screen, snapshot.status);
+    snapshot.web_cat_amp = spe_expert1k_make_status_snapshot(snapshot.valid && snapshot.web_cat_snapshot_until != 0,
+                                                            Cat_Screen,
+                                                            snapshot.web_cat_snapshot);
+    app_status_publish(snapshot);
 }
