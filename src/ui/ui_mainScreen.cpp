@@ -1198,32 +1198,31 @@ void ui_mainScreen_screen_init(void)
     lv_obj_set_width(ui_powerLabel, 120);
     lv_obj_set_height(ui_powerLabel, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(ui_powerLabel, 7);
-    lv_obj_set_y(ui_powerLabel, 0);
+    lv_obj_set_y(ui_powerLabel, 20);
     lv_label_set_text(ui_powerLabel, "PW REV");
     lv_obj_set_style_text_font(ui_powerLabel, &ui_font_LCD, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_powerBar = lv_bar_create(ui_txPowerContainer);
-    lv_obj_set_width(ui_powerBar, 360);
-    lv_obj_set_height(ui_powerBar, 29);
+    lv_obj_set_width(ui_powerBar, 420);
+    lv_obj_set_height(ui_powerBar, 25);
     lv_obj_set_x(ui_powerBar, 136);
-    lv_obj_set_y(ui_powerBar, 0);
+    lv_obj_set_y(ui_powerBar, 22);
     lv_obj_set_style_bg_color(ui_powerBar, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_powerBar, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_color(ui_powerBar, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_opa(ui_powerBar, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_width(ui_powerBar, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_pad(ui_powerBar, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_outline_width(ui_powerBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(ui_powerBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
     if(lv_obj_get_style_pad_top(ui_powerBar, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_powerBar,
                                                                                                lv_obj_get_style_pad_right(ui_powerBar, LV_PART_MAIN) + 1, LV_PART_MAIN);
     ui_pep = lv_label_create(ui_txPowerContainer);
-    lv_obj_set_width(ui_pep, 240);
+    lv_obj_set_width(ui_pep, 185);
     lv_obj_set_height(ui_pep, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_pep, 504);
-    lv_obj_set_y(ui_pep, 0);
+    lv_obj_set_x(ui_pep, 568);
+    lv_obj_set_y(ui_pep, 20);
     lv_label_set_long_mode(ui_pep, LV_LABEL_LONG_CLIP);
     lv_label_set_text(ui_pep, "   0.0 W pep");
+    lv_obj_set_style_text_align(ui_pep, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_pep, &ui_font_LCD, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_txVoltageContainer = lv_obj_create(ui_transmit);
@@ -1237,34 +1236,33 @@ void ui_mainScreen_screen_init(void)
     lv_obj_set_width(ui_vPALabel, 120);
     lv_obj_set_height(ui_vPALabel, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(ui_vPALabel, 7);
-    lv_obj_set_y(ui_vPALabel, 0);
+    lv_obj_set_y(ui_vPALabel, 13);
     lv_label_set_text(ui_vPALabel, "V PA");
     lv_obj_set_style_text_align(ui_vPALabel, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_vPALabel, &ui_font_LCD, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_vBar = lv_bar_create(ui_txVoltageContainer);
-    lv_bar_set_range(ui_vBar, 0, 60);
-    lv_obj_set_width(ui_vBar, 360);
-    lv_obj_set_height(ui_vBar, 29);
+    lv_bar_set_range(ui_vBar, 0, 50);
+    lv_obj_set_width(ui_vBar, 420);
+    lv_obj_set_height(ui_vBar, 25);
     lv_obj_set_x(ui_vBar, 136);
-    lv_obj_set_y(ui_vBar, 0);
+    lv_obj_set_y(ui_vBar, 15);
     lv_obj_set_style_bg_color(ui_vBar, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_vBar, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_color(ui_vBar, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_opa(ui_vBar, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_width(ui_vBar, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_outline_pad(ui_vBar, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_outline_width(ui_vBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_all(ui_vBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
     if(lv_obj_get_style_pad_top(ui_vBar, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_vBar,
                                                                                            lv_obj_get_style_pad_right(ui_vBar, LV_PART_MAIN) + 1, LV_PART_MAIN);
     ui_vPA = lv_label_create(ui_txVoltageContainer);
-    lv_obj_set_width(ui_vPA, 240);
+    lv_obj_set_width(ui_vPA, 185);
     lv_obj_set_height(ui_vPA, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_vPA, 504);
-    lv_obj_set_y(ui_vPA, 0);
+    lv_obj_set_x(ui_vPA, 568);
+    lv_obj_set_y(ui_vPA, 13);
     lv_label_set_long_mode(ui_vPA, LV_LABEL_LONG_CLIP);
     lv_label_set_text(ui_vPA, "   0.0 v");
+    lv_obj_set_style_text_align(ui_vPA, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_vPA, &ui_font_LCD, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_alarmHistory = lv_obj_create(ui_mainScreen);

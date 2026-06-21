@@ -1002,13 +1002,14 @@ void app_status_print_json(Print &out)
   const uint8_t ants_idx = status.antenna_cat & 0x07;
   const uint8_t cat_idx = (status.antenna_cat >> 4) & 0x07;
   const uint8_t out_idx = (status.flags >> 4) & 0x01;
-  const bool current_mode = ((status.flags >> 2) & 0x01) != 0;
   const bool swr_alarm = ((status.flags >> 3) & 0x01) != 0;
 
   out.print(F(",\"flags\":"));
   out.print(status.flags);
   out.print(F(",\"displayCtx\":"));
   out.print(status.display_ctx);
+  out.print(F(",\"opStatus\":"));
+  out.print(status.display_ctx & 0x03);
   out.print(F(",\"freq\":"));
   out.print(status.freq);
   out.print(F(",\"subBand\":"));
@@ -1050,7 +1051,7 @@ void app_status_print_json(Print &out)
   out.print(F(",\"voltage\":"));
   out.print(float(status.voltage) / 10.0f, 1);
   out.print(F(",\"current\":"));
-  out.print(current_mode ? float(status.voltage) / 10.0f : float(status.current) / 10.0f, 1);
+  out.print(float(status.current) / 10.0f, 1);
   out.print(F("}"));
 }
 
@@ -1058,6 +1059,88 @@ uint32_t app_status_sequence(void)
 {
   AmpStatusLock status_lock;
   return published_status_sequence;
+}
+
+static constexpr int meter_bar_x = 136;
+static constexpr int meter_bar_width = 420;
+static constexpr int meter_scale_label_width = 70;
+static constexpr int meter_scale_label_y = 2;
+static constexpr int meter_tick_y = 14;
+static constexpr int meter_lower_row_offset_y = 0;
+static constexpr int meter_tick_count = 21;
+static lv_obj_t *ui_powerScaleLabels[5] = {};
+static lv_obj_t *ui_paScaleLabels[5] = {};
+static lv_obj_t *ui_powerScaleTicks[meter_tick_count] = {};
+static lv_obj_t *ui_paScaleTicks[meter_tick_count] = {};
+
+static lv_obj_t *create_meter_scale_tick(lv_obj_t *parent, uint8_t index, int y_offset)
+{
+  const bool major_tick = (index % 5) == 0;
+  lv_obj_t *tick = lv_obj_create(parent);
+  lv_obj_remove_style_all(tick);
+  lv_obj_set_width(tick, 1);
+  lv_obj_set_height(tick, major_tick ? 8 : 4);
+  lv_obj_set_x(tick, meter_bar_x + (meter_bar_width * index / (meter_tick_count - 1)));
+  lv_obj_set_y(tick, meter_tick_y + y_offset + (major_tick ? 0 : 4));
+  lv_obj_set_style_bg_color(tick, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_opa(tick, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+  return tick;
+}
+
+static lv_obj_t *create_meter_scale_label(lv_obj_t *parent, uint8_t index, int y_offset)
+{
+  lv_obj_t *label = lv_label_create(parent);
+  const int tick_x = meter_bar_x + (meter_bar_width * index / 4);
+  lv_obj_set_width(label, meter_scale_label_width);
+  lv_obj_set_x(label, tick_x - (meter_scale_label_width / 2));
+  lv_obj_set_y(label, meter_scale_label_y + y_offset);
+  lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_obj_set_style_text_font(label, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
+  return label;
+}
+
+static void ensure_transmit_scale_labels()
+{
+  for (uint8_t i = 0; i < 5; ++i) {
+    if (ui_powerScaleLabels[i] == nullptr) {
+      ui_powerScaleLabels[i] = create_meter_scale_label(ui_txPowerContainer, i, 0);
+    }
+    if (ui_paScaleLabels[i] == nullptr) {
+      ui_paScaleLabels[i] = create_meter_scale_label(ui_txVoltageContainer, i, meter_lower_row_offset_y);
+    }
+  }
+
+  for (uint8_t i = 0; i < meter_tick_count; ++i) {
+    if (ui_powerScaleTicks[i] == nullptr) {
+      ui_powerScaleTicks[i] = create_meter_scale_tick(ui_txPowerContainer, i, 0);
+    }
+    if (ui_paScaleTicks[i] == nullptr) {
+      ui_paScaleTicks[i] = create_meter_scale_tick(ui_txVoltageContainer, i, meter_lower_row_offset_y);
+    }
+  }
+}
+
+static void configure_transmit_meters(uint8_t op_status, uint8_t out_idx)
+{
+  const bool full_power = out_idx != 0;
+  const bool show_output_current = op_status == 1;
+
+  ensure_transmit_scale_labels();
+  lv_label_set_text(ui_powerLabel, show_output_current ? "PW OUT" : "PW REV");
+  lv_label_set_text(ui_vPALabel, show_output_current ? "  I PA" : "V PA");
+  lv_bar_set_range(ui_powerBar, 0, full_power ? 1200 : 600);
+  lv_bar_set_range(ui_vBar, 0, (!show_output_current && full_power) ? 60 : 50);
+  static const char * const full_power_scale[5] = {"0", "300", "600", "900", "1200"};
+  static const char * const half_power_scale[5] = {"0", "150", "300", "450", "600"};
+  static const char * const pa_50_scale[5] = {"0", "12.5", "25", "37.5", "50"};
+  static const char * const v_60_scale[5] = {"0", "15", "30", "45", "60"};
+  const char * const *power_scale = full_power ? full_power_scale : half_power_scale;
+  const char * const *pa_scale = (!show_output_current && full_power) ? v_60_scale : pa_50_scale;
+  for (uint8_t i = 0; i < 5; ++i) {
+    lv_label_set_text(ui_powerScaleLabels[i], power_scale[i]);
+    lv_label_set_text(ui_paScaleLabels[i], pa_scale[i]);
+  }
 }
 
 static void print_controller_status()
@@ -1738,7 +1821,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
             if ((packet_in.flags >> 2) & 0x01) {
               // TX mode
               lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
-              lv_label_set_text(ui_powerLabel,"  OUT ");
+              configure_transmit_meters(packet_in.display_ctx & 0x03, (packet_in.flags >> 4) & 0x01);
               lv_obj_add_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
             } else {
               lv_obj_remove_flag(ui_receive, LV_OBJ_FLAG_HIDDEN);
@@ -1804,8 +1887,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
             lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
-            lv_label_set_text(ui_powerLabel,"PA OUT");
-            lv_label_set_text(ui_vPALabel,  "  I PA");
+            configure_transmit_meters(packet_in.display_ctx & 0x03, (packet_in.flags >> 4) & 0x01);
             break;
           case Alarm_History:
             lv_obj_remove_flag(ui_alarmHistory, LV_OBJ_FLAG_HIDDEN);
@@ -2029,6 +2111,11 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
             Serial.println("Value exceeds allowed number, aborting update..");
             return;
       }
+
+      const uint8_t op_status = packet_in.display_ctx & 0x03;
+      if (scr == Operate_RX || scr == Operate_TX || (((packet_in.flags >> 2) & 0x01) != 0 && scr == Receive_Screen)) {
+        configure_transmit_meters(op_status, out_idx);
+      }
     
       if (last_status.band_input != packet_in.band_input) {
         lv_label_set_text_fmt(ui_bandLabel, "BAND\n%s", bands[band_idx]);
@@ -2044,22 +2131,23 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
         lv_label_set_text_fmt(ui_outLabel,"OUT\n%s",outs[out_idx]);      
       }
 
-      if (last_status.power != packet_in.power) {
-        if (scr == Operate_TX) {
-          lv_label_set_text_fmt(ui_pep,"%*.1f W pep",6,float(packet_in.power)/10.0);      
-        } else {
-          lv_label_set_text_fmt(ui_pep,"%*.1f W pep",6,float(packet_in.power)/10.0);     
-        } 
-        lv_bar_set_value(ui_powerBar, packet_in.power/10, LV_ANIM_ON);
+      const bool show_output_current = op_status == 1;
+      const uint16_t power_raw = show_output_current ? packet_in.power : packet_in.rev_power;
+      const uint16_t last_power_raw = show_output_current ? last_status.power : last_status.rev_power;
+      if (last_power_raw != power_raw) {
+        lv_label_set_text_fmt(ui_pep, "%*.1f W pep", 6, float(power_raw)/10.0);
+        lv_bar_set_value(ui_powerBar, power_raw/10, LV_ANIM_ON);
       }
 
-      if (last_status.voltage != packet_in.voltage) {
-        if (scr == Operate_TX) {
-          lv_label_set_text_fmt(ui_vPA,"%*.1f A",4,float(packet_in.voltage)/10.0);      
+      const uint16_t pa_raw = show_output_current ? packet_in.current : packet_in.voltage;
+      const uint16_t last_pa_raw = show_output_current ? last_status.current : last_status.voltage;
+      if (last_pa_raw != pa_raw) {
+        if (show_output_current) {
+          lv_label_set_text_fmt(ui_vPA,"%*.1f A",4,float(pa_raw)/10.0);      
         } else {
-          lv_label_set_text_fmt(ui_vPA,"%*.1f v",4,float(packet_in.voltage)/10.0);      
+          lv_label_set_text_fmt(ui_vPA,"%*.1f V",4,float(pa_raw)/10.0);      
         }
-        lv_bar_set_value(ui_vBar, packet_in.voltage/10, LV_ANIM_ON);
+        lv_bar_set_value(ui_vBar, pa_raw/10, LV_ANIM_ON);
       }
 
       if (last_status.swr_gain != packet_in.swr_gain) {
