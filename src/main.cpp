@@ -394,7 +394,7 @@ static void print_amp_status()
 {
   const AppStatusSnapshot snapshot = app_status_snapshot();
   const ExpertScreen status_screen = snapshot.screen;
-  const Expert_Packet &status = snapshot.status;
+  const AmpStatusSnapshot &status = snapshot.amp;
 
   DebugSerialLock debug_lock;
   Serial.print(F("Amp status valid="));
@@ -418,35 +418,29 @@ static void print_amp_status()
     return;
   }
 
-  const uint8_t band_idx = (status.band_input >> 4) & 0x0f;
-  const uint8_t input_idx = status.band_input & 0x01;
-  const uint8_t ant_idx = status.antenna_cat & 0x07;
-  const uint8_t cat_idx = (status.antenna_cat >> 4) & 0x07;
-  const uint8_t out_idx = (status.flags >> 4) & 0x01;
-
   Serial.print(F("band="));
-  Serial.print(band_idx < COUNT_OF(bands) ? bands[band_idx] : "?");
+  Serial.print(status.band);
   Serial.print(F(" input="));
-  Serial.print(input_idx < COUNT_OF(inputs) ? inputs[input_idx] : "?");
+  Serial.print(status.input);
   Serial.print(F(" antenna="));
-  Serial.print(ant_idx < COUNT_OF(antennas) ? antennas[ant_idx] : "?");
+  Serial.print(status.antenna);
   Serial.print(F(" cat="));
-  Serial.print(cat_idx < COUNT_OF(cats) ? cats[cat_idx] : "?");
+  Serial.print(status.cat);
   Serial.print(F(" out="));
-  Serial.println(out_idx < COUNT_OF(outs) ? outs[out_idx] : "?");
+  Serial.println(status.out);
 
   Serial.print(F("power="));
-  Serial.print(float(status.power) / 10);
+  Serial.print(status.power);
   Serial.print(F("W rev="));
-  Serial.print(float(status.rev_power) / 10);
-  Serial.print(F("W swr/gain="));
-  Serial.print(float(status.swr_gain) / 10);
+  Serial.print(status.reverse);
+  Serial.print(F("W swr="));
+  Serial.print(status.swr);
   Serial.print(F(" temp="));
   Serial.print(status.temp);
   Serial.print(F(" voltage="));
-  Serial.print(float(status.voltage) / 10);
+  Serial.print(status.voltage);
   Serial.print(F(" current="));
-  Serial.println(float(status.current) / 10);
+  Serial.println(status.current);
 }
 
 static constexpr int meter_bar_x = 136;
