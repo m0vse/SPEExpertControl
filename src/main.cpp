@@ -516,6 +516,66 @@ static void configure_transmit_meters(const AmpStatusSnapshot &status)
   }
 }
 
+static void update_cat_screen(const Expert_Packet &packet)
+{
+  lv_obj_remove_flag(ui_catStatus, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN);
+
+  uint8_t s0 = packet.setup[0] & 0x0F;
+  uint8_t s1 = packet.setup[1] & 0x0F;
+  uint8_t s3 = packet.setup[3] & 0x0F;
+  uint8_t s4 = packet.setup[4] & 0x0F;
+
+  if (s0 >= COUNT_OF(cats)) {
+    s0 = 0;
+  }
+  if (s3 >= COUNT_OF(cats)) {
+    s3 = 0;
+  }
+  if (s1 >= COUNT_OF(cat_icom)) {
+    s1 = 0;
+  }
+  if (s4 >= COUNT_OF(cat_icom)) {
+    s4 = 0;
+  }
+
+  const char *type1 = nullptr;
+  const char *type2 = nullptr;
+
+  switch (s0) {
+    case 0x01: type1 = cat_icom[s1]; break;
+    case 0x03: type1 = cat_yaesu[s1]; break;
+    case 0x04: type1 = cat_tentec[s1]; break;
+    default: lv_obj_add_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN); break;
+  }
+
+  switch (s3) {
+    case 0x01: type2 = cat_icom[s4]; break;
+    case 0x03: type2 = cat_yaesu[s4]; break;
+    case 0x04: type2 = cat_tentec[s4]; break;
+    default: lv_obj_add_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN); break;
+  }
+
+  lv_label_set_text_fmt(ui_catStatus1, " CAT: %s", cats[s0]);
+  lv_label_set_text_fmt(ui_catStatus2, " CAT: %s", cats[s3]);
+
+  if (!lv_obj_has_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN)) {
+    lv_label_set_text_fmt(ui_catType1, "TYPE: %s", type1 ? type1 : "");
+  }
+
+  if (!lv_obj_has_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN)) {
+    lv_label_set_text_fmt(ui_catType2, "TYPE: %s", type2 ? type2 : "");
+  }
+
+  lv_label_set_text_fmt(ui_version, " VER:%d%d_%d%d_%d%d_%c",
+                        (packet.setup[6] >> 4) & 0x0f, packet.setup[6] & 0x0f,
+                        (packet.setup[7] >> 4) & 0x0f, packet.setup[7] & 0x0f,
+                        (packet.setup[8] >> 4) & 0x0f, packet.setup[8] & 0x0f,
+                        (char)packet.setup[9]);
+}
+
 static void print_controller_status()
 {
   const AppStatusSnapshot snapshot = app_status_snapshot();
@@ -1165,53 +1225,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
           {
             web_cat_snapshot = packet_in;
             web_cat_snapshot_until = now + cat_display_hold_ms;
-            lv_obj_remove_flag(ui_catStatus, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN);
-
-            uint8_t s0 = packet_in.setup[0] & 0x0F;
-            uint8_t s1 = packet_in.setup[1] & 0x0F;
-            uint8_t s3 = packet_in.setup[3] & 0x0F;
-            uint8_t s4 = packet_in.setup[4] & 0x0F;
-
-            // clamp
-            if (s0 >= COUNT_OF(cats))      s0 = 0;
-            if (s3 >= COUNT_OF(cats))      s3 = 0;
-            if (s1 >= COUNT_OF(cat_icom))  s1 = 0;
-            if (s4 >= COUNT_OF(cat_icom))  s4 = 0;  // or use appropriate array for the path
-
-            // Now select
-            const char *type1 = nullptr;
-            const char *type2 = nullptr;
-
-            switch (s0) {
-              case 0x01: type1 = cat_icom[s1];  break;
-              case 0x03: type1 = cat_yaesu[s1]; break;
-              case 0x04: type1 = cat_tentec[s1]; break;
-              default:   lv_obj_add_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN); break;
-            }
-
-            switch (s3) {
-              case 0x01: type2 = cat_icom[s4];  break;
-              case 0x03: type2 = cat_yaesu[s4]; break;
-              case 0x04: type2 = cat_tentec[s4]; break;
-              default:   lv_obj_add_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN); break;
-            }
-
-            lv_label_set_text_fmt(ui_catStatus1, " CAT: %s", cats[s0]);
-            lv_label_set_text_fmt(ui_catStatus2, " CAT: %s", cats[s3]);
-
-            if (!lv_obj_has_flag(ui_catType1, LV_OBJ_FLAG_HIDDEN))
-                lv_label_set_text_fmt(ui_catType1, "TYPE: %s", type1 ? type1 : "");
-
-            if (!lv_obj_has_flag(ui_catType2, LV_OBJ_FLAG_HIDDEN))
-                lv_label_set_text_fmt(ui_catType2, "TYPE: %s", type2 ? type2 : "");
-            
-            lv_label_set_text_fmt(ui_version," VER:%d%d_%d%d_%d%d_%c",
-                  (packet_in.setup[6] >> 4) & 0x0f, packet_in.setup[6] & 0x0f,
-                  (packet_in.setup[7] >> 4) & 0x0f, packet_in.setup[7] & 0x0f,
-                  (packet_in.setup[8] >> 4) & 0x0f, packet_in.setup[8] & 0x0f, (char)packet_in.setup[9]);
+            update_cat_screen(packet_in);
             break;
           }
           case Operate_RX:
