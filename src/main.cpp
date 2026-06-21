@@ -283,7 +283,7 @@ static rtos::Mutex amp_serial_mutex;
 static rtos::Mutex debug_serial_mutex;
 static rtos::Mutex amp_status_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
-static rtos::Thread serial_thread(osPriorityNormal, 8192, nullptr, "amp");
+static rtos::Thread serial_thread(osPriorityAboveNormal, 8192, nullptr, "amp");
 static rtos::Thread wifi_thread(osPriorityNormal, 8192, nullptr, "wifi");
 static rtos::Thread web_thread(osPriorityBelowNormal, 8192, nullptr, "web");
 
@@ -1242,7 +1242,7 @@ void serial_task()
     }
   }
 
-    rtos::ThisThread::sleep_for(5ms);
+    rtos::ThisThread::sleep_for(1ms);
   }
 }
 
