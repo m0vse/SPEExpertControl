@@ -13,6 +13,7 @@
 #include "amp_control.h"
 #include "app_config.h"
 #include "app_status.h"
+#include "console/serial_console.h"
 #include "display/lvgl_giga_display.h"
 #include "display/lvgl_giga_touch.h"
 #include "lvgl.h"
@@ -186,11 +187,6 @@ static Expert_Packet published_web_cat_snapshot{};
 static unsigned long published_web_cat_snapshot_until = 0;
 static uint32_t published_status_sequence = 0;
 int transformed_touch_devices = 0;
-unsigned long last_console_status = 0;
-static char console_line[96];
-static uint8_t console_line_len = 0;
-static bool console_poll_enabled = false;
-static bool console_last_was_line_end = false;
 struct AmpSerialStats {
   uint32_t rx_bytes = 0;
   uint32_t valid_packets = 0;
@@ -1219,11 +1215,11 @@ static void handle_console_command(char *line)
     Serial.println(F("WiFi setup disabled at build time"));
 #endif
   } else if (strcmp(line, "poll on") == 0) {
-    console_poll_enabled = true;
+    serial_console_set_poll_enabled(true);
     DebugSerialLock debug_lock;
     Serial.println(F("Periodic status polling enabled"));
   } else if (strcmp(line, "poll off") == 0) {
-    console_poll_enabled = false;
+    serial_console_set_poll_enabled(false);
     DebugSerialLock debug_lock;
     Serial.println(F("Periodic status polling disabled"));
   } else {
@@ -1234,42 +1230,8 @@ static void handle_console_command(char *line)
   }
 }
 
-static void console_service(void)
+static void print_console_poll_status(unsigned long now)
 {
-  while (Serial.available() > 0) {
-    const char c = static_cast<char>(Serial.read());
-    if (c == '\r' || c == '\n') {
-      if (console_last_was_line_end) {
-        continue;
-      }
-      console_last_was_line_end = true;
-      console_line[console_line_len] = '\0';
-      handle_console_command(console_line);
-      console_line_len = 0;
-      continue;
-    }
-    console_last_was_line_end = false;
-    if (c == '\b' || c == 0x7f) {
-      if (console_line_len > 0) {
-        --console_line_len;
-      }
-      continue;
-    }
-    if (console_line_len < sizeof(console_line) - 1) {
-      console_line[console_line_len++] = c;
-    }
-  }
-
-  if (!console_poll_enabled) {
-    return;
-  }
-
-  unsigned long now = millis();
-  if (now - last_console_status < 2000) {
-    return;
-  }
-
-  last_console_status = now;
 #if SPE_BRINGUP_LEVEL >= 5
   int serial1_available = 0;
   {
@@ -1572,7 +1534,7 @@ void serial_task()
 void console_task()
 {
   while (true) {
-    console_service();
+    serial_console_service(handle_console_command, print_console_poll_status);
     rtos::ThisThread::sleep_for(10ms);
   }
 }
