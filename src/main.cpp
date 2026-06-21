@@ -1091,6 +1091,9 @@ static void publish_amp_status_snapshot()
   snapshot.web_cat_snapshot = web_cat_snapshot;
   snapshot.web_cat_snapshot_until = web_cat_snapshot_until;
   snapshot.amp = spe_expert1k_make_status_snapshot(snapshot.valid, snapshot.screen, snapshot.status);
+  snapshot.web_cat_amp = spe_expert1k_make_status_snapshot(snapshot.valid && snapshot.web_cat_snapshot_until != 0,
+                                                          Cat_Screen,
+                                                          snapshot.web_cat_snapshot);
   app_status_publish(snapshot);
 }
 

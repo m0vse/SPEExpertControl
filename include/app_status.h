@@ -20,6 +20,7 @@ struct AppStatusSnapshot {
     Expert_Packet web_cat_snapshot{};
     unsigned long web_cat_snapshot_until = 0;
     AmpStatusSnapshot amp{};
+    AmpStatusSnapshot web_cat_amp{};
     uint32_t sequence = 0;
 };
 

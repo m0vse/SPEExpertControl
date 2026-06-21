@@ -7,18 +7,9 @@
 
 #include "app_status.h"
 
-#include "models/spe_expert1k/status_view.h"
 #include <rtos.h>
-#include <stdio.h>
 
 #define COUNT_OF_LOCAL(a) (sizeof(a) / sizeof((a)[0]))
-
-static const char * const outs[] = {"HALF", "FULL"};
-static const char * const tscales[] = {"°F", "°C"};
-static const char * const inputs[] = {"1", "2"};
-static const char * const antennas[] = {"1", "2", "3", "4"};
-static const char * const bands[] = {"160 m", "80 m", "40 m", "30 m", "20 m", "17 m", "15 m", "12 m", "10 m", "6 m"};
-static const char * const cats[] = {"SPE", "ICOM", "KENWD", "YAESU", "TTEC", "FLEX", "RS232", "NONE"};
 
 static rtos::Mutex status_mutex;
 static AppStatusSnapshot published;
@@ -59,6 +50,7 @@ void app_status_print_json(Print &out)
     ExpertScreen current_screen = snapshot.screen;
     const bool show_cat_snapshot = snapshot.valid && current_screen == Cat_Screen && snapshot.web_cat_snapshot_until != 0;
     Expert_Packet status = show_cat_snapshot ? snapshot.web_cat_snapshot : snapshot.status;
+    AmpStatusSnapshot amp = show_cat_snapshot ? snapshot.web_cat_amp : snapshot.amp;
     if (show_cat_snapshot) {
         current_screen = Cat_Screen;
     }
@@ -75,24 +67,16 @@ void app_status_print_json(Print &out)
         return;
     }
 
-    const uint8_t band_idx = (status.band_input >> 4) & 0x0f;
-    const uint8_t input_idx = status.band_input & 0x01;
-    const uint8_t ants_idx = status.antenna_cat & 0x07;
-    const uint8_t cat_idx = (status.antenna_cat >> 4) & 0x07;
-    const uint8_t out_idx = (status.flags >> 4) & 0x01;
-    const bool swr_alarm = ((status.flags >> 3) & 0x01) != 0;
-    SpeStatusView status_view(status);
-
     out.print(F(",\"flags\":"));
-    out.print(status.flags);
+    out.print(amp.flags);
     out.print(F(",\"displayCtx\":"));
-    out.print(status.display_ctx);
+    out.print(amp.display_context);
     out.print(F(",\"opStatus\":"));
-    out.print(status_view.op_status());
+    out.print(amp.op_status);
     out.print(F(",\"freq\":"));
-    out.print(status.freq);
+    out.print(amp.frequency);
     out.print(F(",\"subBand\":"));
-    out.print(status.sub_band);
+    out.print(amp.sub_band);
     out.print(F(",\"setup\":["));
     for (uint8_t i = 0; i < COUNT_OF_LOCAL(status.setup); ++i) {
         if (i) {
@@ -102,65 +86,57 @@ void app_status_print_json(Print &out)
     }
     out.print(']');
     out.print(F(",\"input\":"));
-    json_print_string(out, input_idx < COUNT_OF_LOCAL(inputs) ? inputs[input_idx] : "?");
+    json_print_string(out, amp.input);
     out.print(F(",\"band\":"));
-    json_print_string(out, band_idx < COUNT_OF_LOCAL(bands) ? bands[band_idx] : "?");
+    json_print_string(out, amp.band);
     out.print(F(",\"antenna\":"));
-    json_print_string(out, ants_idx < COUNT_OF_LOCAL(antennas) ? antennas[ants_idx] : "?");
+    json_print_string(out, amp.antenna);
     out.print(F(",\"cat\":"));
-    json_print_string(out, cat_idx < COUNT_OF_LOCAL(cats) ? cats[cat_idx] : "?");
+    json_print_string(out, amp.cat);
     out.print(F(",\"out\":"));
-    json_print_string(out, out_idx < COUNT_OF_LOCAL(outs) ? outs[out_idx] : "?");
+    json_print_string(out, amp.out);
     out.print(F(",\"power\":"));
-    out.print(float(status.power) / 10.0f, 1);
+    out.print(amp.power, 1);
     out.print(F(",\"reverse\":"));
-    out.print(float(status.rev_power) / 10.0f, 1);
+    out.print(amp.reverse, 1);
     out.print(F(",\"swr\":"));
-    if (swr_alarm) {
-        json_print_string(out, "--.--");
-    } else {
-        char swr[8];
-        snprintf(swr, sizeof(swr), "%.2f", float(status.swr_gain) / 100.0f);
-        json_print_string(out, swr);
-    }
+    json_print_string(out, amp.swr);
     out.print(F(",\"temp\":"));
-    char temp[12];
-    snprintf(temp, sizeof(temp), "%d%s", status.temp, tscales[(status.flags >> 7) & 0x01]);
-    json_print_string(out, temp);
+    json_print_string(out, amp.temp);
     out.print(F(",\"voltage\":"));
-    out.print(float(status.voltage) / 10.0f, 1);
+    out.print(amp.voltage, 1);
     out.print(F(",\"current\":"));
-    out.print(float(status.current) / 10.0f, 1);
+    out.print(amp.current, 1);
     out.print(F(",\"meterPowerLabel\":"));
-    json_print_string(out, status_view.power_label());
+    json_print_string(out, amp.power_meter.label);
     out.print(F(",\"meterPower\":"));
-    out.print(float(status_view.power_raw_tenths()) / 10.0f, 1);
+    out.print(amp.power_meter.value, 1);
     out.print(F(",\"meterPowerMax\":"));
-    out.print(status_view.power_bar_max());
+    out.print(amp.power_meter.max);
     out.print(F(",\"meterPowerSuffix\":"));
-    json_print_string(out, status_view.power_value_suffix());
+    json_print_string(out, amp.power_meter.suffix);
     out.print(F(",\"meterPowerScale\":["));
     for (uint8_t i = 0; i < 5; ++i) {
         if (i) {
             out.print(',');
         }
-        json_print_string(out, status_view.power_scale_label(i));
+        json_print_string(out, amp.power_meter.scale[i]);
     }
     out.print(']');
     out.print(F(",\"meterPaLabel\":"));
-    json_print_string(out, status_view.pa_label());
+    json_print_string(out, amp.pa_meter.label);
     out.print(F(",\"meterPa\":"));
-    out.print(float(status_view.pa_raw_tenths()) / 10.0f, 1);
+    out.print(amp.pa_meter.value, 1);
     out.print(F(",\"meterPaMax\":"));
-    out.print(status_view.pa_bar_max());
+    out.print(amp.pa_meter.max);
     out.print(F(",\"meterPaSuffix\":"));
-    json_print_string(out, status_view.pa_value_suffix());
+    json_print_string(out, amp.pa_meter.suffix);
     out.print(F(",\"meterPaScale\":["));
     for (uint8_t i = 0; i < 5; ++i) {
         if (i) {
             out.print(',');
         }
-        json_print_string(out, status_view.pa_scale_label(i));
+        json_print_string(out, amp.pa_meter.scale[i]);
     }
     out.print(']');
     out.print(F("}"));
