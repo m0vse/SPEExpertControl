@@ -43,7 +43,6 @@
 #include <WiFi.h>
 #endif
 
-#include <initializer_list>
 #include <string.h>
 
 using namespace std::chrono_literals;
@@ -61,7 +60,6 @@ uint8_t progress = 0;
 #define COUNT_OF(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
 void process_packet(const Expert_Packet &packet_in, uint8_t len_in);
-bool send_command(std::initializer_list<uint8_t> cmd);
 void button_pressed(lv_event_t * e);
 void ui_task(void);
 void serial_task(void);
@@ -178,7 +176,6 @@ const unsigned long interval = 1000;
 const unsigned long cat_display_hold_ms = 6000;
 bool touch_ready = false;
 bool amp_status_valid = false;
-static bool amp_remote_update_enabled = true;
 static Expert_Packet web_cat_snapshot{};
 static unsigned long web_cat_snapshot_until = 0;
 int transformed_touch_devices = 0;
@@ -697,7 +694,7 @@ static void handle_console_command(char *line)
   } else if (strcmp(line, "reboot") == 0 || strcmp(line, "reset") == 0) {
     reboot_controller();
   } else if (strcmp(line, "rcu") == 0) {
-    send_command({Rcu_On});
+    amp_control_power_on();
   } else if (strcmp(line, "dtr") == 0) {
     DebugSerialLock debug_lock;
     Serial.print(F("Amp DTR pin=D"));
@@ -1021,14 +1018,14 @@ void serial_task()
   }  
   serial_transport_note_drain_burst(drained_bytes);
 
-// Send Rcu_On command if nothing received for over ten seconds.
+// Keep the amplifier remote-control stream alive if no status packets arrive.
   unsigned long now = millis();
-  if (amp_remote_update_enabled && now - last_rcu >= interval)
+  if (amp_control_remote_updates_enabled() && now - last_rcu >= interval)
   {
     //Serial1.end();      // close serial port
     //delay(100);        //wait 100 millis
     //Serial1.begin(9600);
-    send_command({Rcu_On});
+    amp_control_power_on();
     completed_packet = true;
     last_rcu=now;
     if (progress < 100) {
@@ -1522,118 +1519,46 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
 }
 
 
-bool send_command(std::initializer_list<uint8_t> cmd) {
-  const bool rcu_on = cmd.size() == 1 && *cmd.begin() == Rcu_On;
-  const bool off_key = cmd.size() == 2 && *cmd.begin() == Key_On && *(cmd.begin() + 1) == Off_Key;
-
-  if (rcu_on) {
-    amp_remote_update_enabled = true;
-    amp_dtr_set(true);
-  }
-
-  if (off_key) {
-    amp_dtr_set(false);
-    if (!spe_expert1k_queue_command(cmd)) {
-      return false;
-    }
-    if (!spe_expert1k_queue_command({Rcu_Off})) {
-      return false;
-    }
-    amp_remote_update_enabled = false;
-    return true;
-  }
-
-  return spe_expert1k_queue_command(cmd);
-}
-
-bool amp_control_press_key(const char *name)
-{
-  if (strcmp(name, "l_down") == 0) {
-    return send_command({Key_On, L_Minus_Key});
-  } else if (strcmp(name, "l_up") == 0) {
-    return send_command({Key_On, L_Plus_Key});
-  } else if (strcmp(name, "c_down") == 0) {
-    return send_command({Key_On, C_Minus_Key});
-  } else if (strcmp(name, "c_up") == 0) {
-    return send_command({Key_On, C_Plus_Key});
-  } else if (strcmp(name, "tune") == 0) {
-    return send_command({Key_On, Tune_Key});
-  } else if (strcmp(name, "input") == 0) {
-    return send_command({Key_On, In_Key});
-  } else if (strcmp(name, "band_down") == 0) {
-    return send_command({Key_On, Band_Minus_Key});
-  } else if (strcmp(name, "band_up") == 0) {
-    return send_command({Key_On, Band_Plus_Key});
-  } else if (strcmp(name, "ant") == 0) {
-    return send_command({Key_On, Ant_Key});
-  } else if (strcmp(name, "left") == 0) {
-    return send_command({Key_On, Left_Key});
-  } else if (strcmp(name, "right") == 0) {
-    return send_command({Key_On, Right_Key});
-  } else if (strcmp(name, "cat") == 0) {
-    return send_command({Key_On, Cat_Key});
-  } else if (strcmp(name, "set") == 0) {
-    return send_command({Key_On, Set_Key});
-  } else if (strcmp(name, "off") == 0) {
-    return send_command({Key_On, Off_Key});
-  } else if (strcmp(name, "on") == 0) {
-    return send_command({Rcu_On});
-  } else if (strcmp(name, "power") == 0) {
-    return send_command({Key_On, Power_Key});
-  } else if (strcmp(name, "display") == 0) {
-    return send_command({Key_On, Display_Key});
-  } else if (strcmp(name, "operate") == 0) {
-    return send_command({Key_On, Operate_Key});
-  } else {
-    return false;
-  }
-}
-
-/* Rather than have a separate function for every button, we check who the calling object it and act on it
-L_Plus_Key=0x30,L_Minus_Key=0x31,C_Minus_Key=0x32,C_Plus_Key=0x33,Tune_Key=0x34,In_Key=0x28,Band_Minus_Key=0x29,Band_Plus_Key=0x2A,
-Ant_Key=0x2B,Cat_Key=0x2C,Left_Key=0x2D,Right_Key=0x2E,Set_Key=0x2F,Off_Key=0x18,Power_Key=0x1A,Display_Key=0x1B,Operate_Key=0x1C
-*/
-
 void button_pressed(lv_event_t * e)
 {
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_current_target_obj(e);
   if(code == LV_EVENT_CLICKED || code == LV_EVENT_LONG_PRESSED_REPEAT) {
     if (obj == ui_buttonLowerL)
-      send_command({Key_On,L_Minus_Key});
+      amp_control_press_key("l_down");
     else if (obj == ui_buttonHigherL)
-      send_command({Key_On,L_Plus_Key});
+      amp_control_press_key("l_up");
     else if (obj == ui_buttonLowerC)
-      send_command({Key_On,C_Minus_Key});
+      amp_control_press_key("c_down");
     else if (obj == ui_buttonHigherC)
-      send_command({Key_On,C_Plus_Key});
+      amp_control_press_key("c_up");
     else if (obj == ui_buttonTune)
-      send_command({Key_On,Tune_Key});
+      amp_control_press_key("tune");
     else if (obj == ui_buttonInput)
-      send_command({Key_On,In_Key});
+      amp_control_press_key("input");
     if (obj == ui_buttonBandDown)
-      send_command({Key_On,Band_Minus_Key});
+      amp_control_press_key("band_down");
     else if (obj == ui_buttonBandUp)
-      send_command({Key_On,Band_Plus_Key});
+      amp_control_press_key("band_up");
     if (obj == ui_buttonAnt)
-      send_command({Key_On,Ant_Key});
+      amp_control_press_key("ant");
     if (obj == ui_buttonLeftUp)
-      send_command({Key_On,Left_Key});
+      amp_control_press_key("left");
     else if (obj == ui_buttonRightDown)
-      send_command({Key_On,Right_Key});
+      amp_control_press_key("right");
     else if (obj == ui_buttonCat)
-      send_command({Key_On,Cat_Key});
+      amp_control_press_key("cat");
     else if (obj == ui_buttonSet)
-      send_command({Key_On,Set_Key});
+      amp_control_press_key("set");
     else if (obj == ui_buttonOff)
-      send_command({Key_On,Off_Key});
+      amp_control_press_key("off");
     else if (obj == ui_buttonOn) 
-      send_command({Rcu_On});
+      amp_control_power_on();
     else if (obj == ui_buttonPower)
-      send_command({Key_On,Power_Key});
+      amp_control_press_key("power");
     else if (obj == ui_buttonDisplay)
-      send_command({Key_On,Display_Key});
+      amp_control_press_key("display");
     else if (obj == ui_buttonOperate)
-      send_command({Key_On,Operate_Key});
+      amp_control_press_key("operate");
   }
 }

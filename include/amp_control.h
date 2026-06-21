@@ -14,3 +14,15 @@
  * @return true when the name was recognised and a command was queued.
  */
 bool amp_control_press_key(const char *name);
+
+/**
+ * Queue the remote-control ON command and assert DTR for amplifier wake.
+ *
+ * @return true when the command was queued.
+ */
+bool amp_control_power_on();
+
+/**
+ * @return true while automatic RCU_ON keepalive polling should continue.
+ */
+bool amp_control_remote_updates_enabled();
