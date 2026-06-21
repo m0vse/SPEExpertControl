@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <Arduino.h>
+
 /**
  * Service one pass of the lightweight HTTP control server.
  *
@@ -14,3 +16,8 @@
  * expected to be called repeatedly from the background serial/network task.
  */
 void control_server_service(void);
+
+/**
+ * Print lightweight HTTP server counters to a debug console or other Print sink.
+ */
+void control_server_print_stats(Print &out);

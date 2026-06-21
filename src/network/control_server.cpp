@@ -13,6 +13,41 @@
 #include "network/wifi_lock.h"
 #include <Arduino.h>
 #include <WiFi.h>
+#include <rtos.h>
+
+struct ControlServerStats {
+    uint32_t server_starts = 0;
+    uint32_t wifi_disconnects = 0;
+    uint32_t clients = 0;
+    uint32_t empty_requests = 0;
+    uint32_t index_requests = 0;
+    uint32_t status_requests = 0;
+    uint32_t key_requests = 0;
+    uint32_t logo_requests = 0;
+    uint32_t bad_key_requests = 0;
+    uint32_t last_request_ms = 0;
+    char last_request[32] = "";
+};
+
+static rtos::Mutex stats_mutex;
+static ControlServerStats stats;
+
+static void updateStats(void (*update)(ControlServerStats &))
+{
+    stats_mutex.lock();
+    update(stats);
+    stats_mutex.unlock();
+}
+
+static void recordRequest(const char *path)
+{
+    stats_mutex.lock();
+    ++stats.clients;
+    stats.last_request_ms = millis();
+    strncpy(stats.last_request, path ? path : "", sizeof(stats.last_request) - 1);
+    stats.last_request[sizeof(stats.last_request) - 1] = '\0';
+    stats_mutex.unlock();
+}
 
 class ControlServer {
 public:
@@ -20,6 +55,9 @@ public:
     {
         const int wifi_status = WiFi.status();
         if (wifi_status != WL_CONNECTED) {
+            if (last_wifi_status_ == WL_CONNECTED) {
+                updateStats([](ControlServerStats &s) { ++s.wifi_disconnects; });
+            }
             last_wifi_status_ = wifi_status;
             return;
         }
@@ -47,6 +85,7 @@ private:
 
         server_.begin();
         started_ = true;
+        updateStats([](ControlServerStats &s) { ++s.server_starts; });
         Serial.println(F("HTTP control server started"));
     }
 
@@ -89,13 +128,33 @@ private:
             client.read();
         }
 
+        if (request_line.length() == 0) {
+            updateStats([](ControlServerStats &s) {
+                ++s.clients;
+                ++s.empty_requests;
+                s.last_request_ms = millis();
+                strncpy(s.last_request, "(empty)", sizeof(s.last_request) - 1);
+                s.last_request[sizeof(s.last_request) - 1] = '\0';
+            });
+            client.stop();
+            return;
+        }
+
         if (request_line.startsWith("GET /spe-logo.svg")) {
+            recordRequest("/spe-logo.svg");
+            updateStats([](ControlServerStats &s) { ++s.logo_requests; });
             sendLogo(client);
         } else if (request_line.startsWith("GET /api/status") || request_line.startsWith("GET /status.json")) {
+            recordRequest("/api/status");
+            updateStats([](ControlServerStats &s) { ++s.status_requests; });
             sendStatusJson(client);
         } else if (request_line.startsWith("GET /api/key?name=")) {
+            recordRequest("/api/key");
+            updateStats([](ControlServerStats &s) { ++s.key_requests; });
             handleKeyRequest(client, request_line);
         } else {
+            recordRequest("/");
+            updateStats([](ControlServerStats &s) { ++s.index_requests; });
             sendIndex(client);
         }
 
@@ -142,6 +201,9 @@ private:
         }
 
         const bool ok = amp_control_press_key(name.c_str());
+        if (!ok) {
+            updateStats([](ControlServerStats &s) { ++s.bad_key_requests; });
+        }
         client.println(ok ? F("HTTP/1.1 200 OK") : F("HTTP/1.1 400 Bad Request"));
         client.println(F("Content-Type: application/json"));
         client.println(F("Connection: close"));
@@ -188,4 +250,36 @@ void control_server_service(void)
 {
     WifiStackLock lock;
     control_server.service();
+}
+
+void control_server_print_stats(Print &out)
+{
+    ControlServerStats snapshot;
+    stats_mutex.lock();
+    snapshot = stats;
+    stats_mutex.unlock();
+
+    out.println(F("HTTP server stats:"));
+    out.print(F("  server_starts="));
+    out.println(snapshot.server_starts);
+    out.print(F("  wifi_disconnects="));
+    out.println(snapshot.wifi_disconnects);
+    out.print(F("  clients="));
+    out.println(snapshot.clients);
+    out.print(F("  empty_requests="));
+    out.println(snapshot.empty_requests);
+    out.print(F("  index="));
+    out.print(snapshot.index_requests);
+    out.print(F(" status="));
+    out.print(snapshot.status_requests);
+    out.print(F(" key="));
+    out.print(snapshot.key_requests);
+    out.print(F(" logo="));
+    out.println(snapshot.logo_requests);
+    out.print(F("  bad_key_requests="));
+    out.println(snapshot.bad_key_requests);
+    out.print(F("  last_request_ms="));
+    out.print(snapshot.last_request_ms);
+    out.print(F(" path="));
+    out.println(snapshot.last_request);
 }

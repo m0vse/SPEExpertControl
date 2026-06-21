@@ -464,6 +464,7 @@ static void print_console_help()
   Serial.println(F("  help        Show this help"));
   Serial.println(F("  status      Controller summary"));
   Serial.println(F("  wifi        WiFi status, IP and firmware"));
+  Serial.println(F("  web         HTTP server counters"));
   Serial.println(F("  amp         Last amplifier status packet"));
   Serial.println(F("  scan        Blocking WiFi scan to serial"));
   Serial.println(F("  rcu         Send RCU_ON to the amplifier"));
@@ -535,6 +536,17 @@ static void print_wifi_status()
 #else
   DebugSerialLock debug_lock;
   Serial.println(F("WiFi disabled at build time"));
+#endif
+}
+
+static void print_web_status()
+{
+#if SPE_ENABLE_WEB_SERVER
+  DebugSerialLock debug_lock;
+  control_server_print_stats(Serial);
+#else
+  DebugSerialLock debug_lock;
+  Serial.println(F("Web server disabled at build time"));
 #endif
 }
 
@@ -864,6 +876,8 @@ static void handle_console_command(char *line)
     print_controller_status();
   } else if (strcmp(line, "wifi") == 0) {
     print_wifi_status();
+  } else if (strcmp(line, "web") == 0) {
+    print_web_status();
   } else if (strcmp(line, "amp") == 0) {
     print_amp_status();
   } else if (strcmp(line, "scan") == 0) {
