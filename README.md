@@ -46,7 +46,7 @@ The MAX3232 outputs should connect to the amplifier side of the D-type socket:
 
 `D7` is assigned as `SPE_AMP_DTR_PIN`. The firmware asserts DTR during controller startup to request remote power-on. When the OFF button command is sent, the firmware releases DTR immediately, sends the OFF key command and `RCU_OFF`, and stops the periodic `RCU_ON` polling so the amplifier can power down. Pressing ON asserts DTR again and restarts remote console updates. This behaviour is deliberately driven by the button commands rather than the last received amplifier state, so OFF can still release DTR if the amplifier is not currently responding.
 
-Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7` low to assert RS-232 DTR. If the wiring is moved later, change `SPE_AMP_DTR_PIN` in [src/main.cpp](src/main.cpp).
+Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7` low to assert RS-232 DTR. If the wiring is moved later, change `SPE_AMP_DTR_PIN` in [include/amp_dtr.h](include/amp_dtr.h).
 
 ## Current Features
 

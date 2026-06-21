@@ -17,8 +17,11 @@
 #include "display/lvgl_giga_touch.h"
 #include "lvgl.h"
 #include <ui.h>
+#include "amp_dtr.h"
 #include "models/spe_expert1k/expertpackets.h"
 #include "models/spe_expert1k/menuitems.h"
+#include "models/spe_expert1k/packet_parser.h"
+#include "models/spe_expert1k/protocol.h"
 #include "models/spe_expert1k/status_view.h"
 #include "ui/menu_control.h"
 
@@ -51,14 +54,6 @@ using namespace std::chrono_literals;
 #define SPE_VERBOSE_PACKET_LOG 0
 #endif
 
-#ifndef SPE_AMP_DTR_PIN
-#define SPE_AMP_DTR_PIN 7
-#endif
-
-#ifndef SPE_AMP_DTR_ASSERTED_LEVEL
-#define SPE_AMP_DTR_ASSERTED_LEVEL LOW
-#endif
-
 uint8_t progress = 0;
 
 #define COUNT_OF(a) ((int)(sizeof(a) / sizeof((a)[0])))
@@ -66,7 +61,6 @@ uint8_t progress = 0;
 void process_packet(const Expert_Packet &packet_in, uint8_t len_in);
 bool send_command(std::initializer_list<uint8_t> cmd);
 void button_pressed(lv_event_t * e);
-static void amp_dtr_set(bool asserted);
 void ui_task(void);
 void serial_task(void);
 void console_task(void);
@@ -150,108 +144,6 @@ const char* ant_messages[] = {
 
 const char* ant_num[] = { " 1", " 2", " 3", " 4","NO" };
 
-enum ExpertStatus {Sync,Len,Data,Sum};
-
-enum ExpertCommands {Key_On=0x10,Rcu_On=0x80,Rcu_Off=0x81,Cat_232=0x82};
-
-enum ExpertKeys {L_Minus_Key=0x30,L_Plus_Key=0x31,C_Minus_Key=0x32,C_Plus_Key=0x33,Tune_Key=0x34,In_Key=0x28,Band_Minus_Key=0x29,Band_Plus_Key=0x2A,
-                Ant_Key=0x2B,Cat_Key=0x2C,Left_Key=0x2D,Right_Key=0x2E,Set_Key=0x2F,Off_Key=0x18,Power_Key=0x1A,Display_Key=0x1B,Operate_Key=0x1C};
-
-enum ExpertScreen {Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,Unused_Screen_A,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
-                  Set_BaudRate,Manual_Tune,Backlight,Unused_Screen_B,Unused_Screen_C,
-                  Warning_V_Low_Half,Warning_V_Low_Full,Warning_V_High_Half,Warning_V_High_Full,Warning_A_High_Half,Warning_A_High_Full,Warning_Temp,Warning_Over_Driving,
-                  Unused_Screen_D,Unused_Screen_E,Warning_Reverse,Warning_Protection,
-                  Alarm_History=0x1D,Shutdown=0x1E,BootMessage=0xff};
-
-class ExpertPacketParser {
-public:
-  enum class Result {
-    None,
-    PacketReady,
-    InvalidChecksum
-  };
-
-  Result read(uint8_t value)
-  {
-    switch (state_) {
-      case Sync:
-        if (value != 0xAA) {
-          bytes_ = 0x00;
-        } else if (bytes_ == 2) {
-          state_ = Len;
-        } else {
-          bytes_++;
-        }
-        break;
-      case Len:
-        if (value == 1 || value == MAX_DATA) {
-          length_ = value;
-          state_ = Data;
-        } else {
-          resetFromUnexpected(value);
-        }
-        bytes_ = 0x00;
-        break;
-      case Data:
-        reinterpret_cast<uint8_t *>(&packet_)[bytes_++] = value;
-        checksum_ += value;
-        if (bytes_ == length_) {
-          state_ = Sum;
-        }
-        break;
-      case Sum:
-        if (checksum_ == value) {
-          resetState();
-          return Result::PacketReady;
-        }
-        invalid_length_ = length_;
-        invalid_expected_checksum_ = checksum_;
-        invalid_received_checksum_ = value;
-        resetFromUnexpected(value);
-        return Result::InvalidChecksum;
-    }
-
-    return Result::None;
-  }
-
-  const Expert_Packet &packet() const { return packet_; }
-  uint8_t length() const { return length_; }
-  uint8_t invalidLength() const { return invalid_length_; }
-  uint8_t invalidExpectedChecksum() const { return invalid_expected_checksum_; }
-  uint8_t invalidReceivedChecksum() const { return invalid_received_checksum_; }
-
-private:
-  void reset()
-  {
-    resetState();
-    length_ = 0x00;
-  }
-
-  void resetState()
-  {
-    bytes_ = 0x00;
-    checksum_ = 0x00;
-    state_ = Sync;
-  }
-
-  void resetFromUnexpected(uint8_t value)
-  {
-    reset();
-    if (value == 0xAA) {
-      bytes_ = 0x01;
-    }
-  }
-
-  ExpertStatus state_ = Sync;
-  Expert_Packet packet_{};
-  uint8_t bytes_ = 0x00;
-  uint8_t checksum_ = 0x00;
-  uint8_t length_ = 0x00;
-  uint8_t invalid_length_ = 0x00;
-  uint8_t invalid_expected_checksum_ = 0x00;
-  uint8_t invalid_received_checksum_ = 0x00;
-};
-
 // Setup options menu items
 //static lv_obj_t *setup_options_items[] {ui_setupAntenna,ui_setupCat,ui_setupManualTune,ui_setupBacklight,ui_setupContest,ui_setupBeep,ui_setupStart,ui_setupTemp,ui_setupQuit};
 MenuController setup_options_ctrl;
@@ -284,7 +176,6 @@ const unsigned long interval = 1000;
 const unsigned long cat_display_hold_ms = 6000;
 bool touch_ready = false;
 bool amp_status_valid = false;
-static bool amp_dtr_asserted = false;
 static bool amp_remote_update_enabled = true;
 static Expert_Packet web_cat_snapshot{};
 static unsigned long web_cat_snapshot_until = 0;
@@ -328,14 +219,9 @@ struct QueuedAmpPacket {
   Expert_Packet packet;
   uint8_t len = 0;
 };
-enum class AmpCommandPostAction : uint8_t {
-  None,
-  DeassertDtr
-};
 struct QueuedAmpCommand {
   uint8_t data[AMP_COMMAND_MAX_LEN]{};
   uint8_t len = 0;
-  AmpCommandPostAction post_action = AmpCommandPostAction::None;
 };
 static QueuedAmpPacket amp_packet_queue[AMP_PACKET_QUEUE_SIZE];
 static uint8_t amp_packet_queue_head = 0;
@@ -512,7 +398,7 @@ static void queue_amp_packet(const Expert_Packet &packet, uint8_t len)
   amp_serial_note_queue_depth(depth);
 }
 
-static bool queue_amp_command(std::initializer_list<uint8_t> cmd, AmpCommandPostAction post_action = AmpCommandPostAction::None)
+static bool queue_amp_command(std::initializer_list<uint8_t> cmd)
 {
   if (cmd.size() == 0 || cmd.size() > AMP_COMMAND_MAX_LEN) {
     return false;
@@ -528,7 +414,6 @@ static bool queue_amp_command(std::initializer_list<uint8_t> cmd, AmpCommandPost
 
     QueuedAmpCommand &queued = amp_command_queue[amp_command_queue_head];
     queued.len = static_cast<uint8_t>(cmd.size());
-    queued.post_action = post_action;
     uint8_t i = 0;
     for (uint8_t c : cmd) {
       queued.data[i++] = c;
@@ -659,25 +544,6 @@ static void process_next_queued_amp_command()
   }
 
   amp_serial.send(queued.data, queued.len);
-  if (queued.post_action == AmpCommandPostAction::DeassertDtr) {
-    amp_dtr_set(false);
-  }
-}
-
-static void amp_dtr_set(bool asserted)
-{
-  if (asserted) {
-    digitalWrite(SPE_AMP_DTR_PIN, SPE_AMP_DTR_ASSERTED_LEVEL);
-  } else {
-    digitalWrite(SPE_AMP_DTR_PIN, SPE_AMP_DTR_ASSERTED_LEVEL == HIGH ? LOW : HIGH);
-  }
-  amp_dtr_asserted = asserted;
-}
-
-static void amp_dtr_begin()
-{
-  pinMode(SPE_AMP_DTR_PIN, OUTPUT);
-  amp_dtr_set(true);
 }
 
 static void boot_log(const __FlashStringHelper *message)
@@ -722,30 +588,6 @@ static const __FlashStringHelper *wifi_status_name(int status)
     case WL_DISCONNECTED: return F("disconnected");
     case WL_NO_MODULE: return F("no_module");
     default: return F("unknown");
-  }
-}
-
-static const char *screen_name(ExpertScreen value)
-{
-  switch (value) {
-    case Receive_Screen: return "receive";
-    case Operate_RX: return "operate_rx";
-    case Operate_TX: return "operate_tx";
-    case Cat_Screen: return "cat";
-    case Data_Stored: return "data_stored";
-    case Setup_Options: return "setup_options";
-    case Set_Antenna: return "set_antenna";
-    case Set_Cat: return "set_cat";
-    case Set_Yaesu: return "set_yaesu";
-    case Set_Icom: return "set_icom";
-    case Set_TenTec: return "set_tentec";
-    case Set_BaudRate: return "set_baudrate";
-    case Manual_Tune: return "manual_tune";
-    case Backlight: return "backlight";
-    case Alarm_History: return "alarm_history";
-    case Shutdown: return "shutdown";
-    case BootMessage: return "boot";
-    default: return "other";
   }
 }
 
@@ -914,11 +756,11 @@ static void print_amp_status()
   Serial.print(F("last_rcu_ms="));
   Serial.println(last_rcu);
   Serial.print(F("dtr_pin=D"));
-  Serial.print(SPE_AMP_DTR_PIN);
+  Serial.print(amp_dtr_pin());
   Serial.print(F(" asserted="));
-  Serial.print(amp_dtr_asserted ? F("yes") : F("no"));
+  Serial.print(amp_dtr_is_asserted() ? F("yes") : F("no"));
   Serial.print(F(" gpio_level="));
-  Serial.println(digitalRead(SPE_AMP_DTR_PIN) == HIGH ? F("HIGH") : F("LOW"));
+  Serial.println(amp_dtr_gpio_level() == HIGH ? F("HIGH") : F("LOW"));
 
   if (!status_valid) {
     Serial.println(F("No 30-byte amplifier status packet received yet"));
@@ -1347,11 +1189,11 @@ static void handle_console_command(char *line)
   } else if (strcmp(line, "dtr") == 0) {
     DebugSerialLock debug_lock;
     Serial.print(F("Amp DTR pin=D"));
-    Serial.print(SPE_AMP_DTR_PIN);
+    Serial.print(amp_dtr_pin());
     Serial.print(F(" asserted="));
-    Serial.print(amp_dtr_asserted ? F("yes") : F("no"));
+    Serial.print(amp_dtr_is_asserted() ? F("yes") : F("no"));
     Serial.print(F(" gpio_level="));
-    Serial.println(digitalRead(SPE_AMP_DTR_PIN) == HIGH ? F("HIGH") : F("LOW"));
+    Serial.println(amp_dtr_gpio_level() == HIGH ? F("HIGH") : F("LOW"));
   } else if (strcmp(line, "setup") == 0 || strcmp(line, "wifi-popup") == 0) {
 #if SPE_ENABLE_WIFI_SETUP
     LvglLock lock;
