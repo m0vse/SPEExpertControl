@@ -68,49 +68,9 @@ void console_task(void);
 void wifi_task(void);
 void web_task(void);
 
-const char* tscales[] = {"°F", "°C"};
-
-const char* startup[] = {"Standby", "Operate"};
-
-const char* onoff[] = {"Off", "On "};
-
-const char* inputs[] = {"1", "2"};
-
-const char* warnings[] = {"0x10: DEBUGGING (IGNORE)",        "POWER MANAGEMENT : V PA < 20 V", 
-                          "POWER MANAGEMENT : V PA < 26 V",  "POWER MANAGEMENT : V PA > 50 V",
-                          "POWER MANAGEMENT : V PA > 50 V",  "POWER MANAGEMENT : I PA > 40 A",  
-                          "POWER MANAGEMENT : I PA > 50 A",  "OVER TEMPERATURE : TEMP > 90°C",
-                          "P.A. MANAGEMENT : OVER DRIVING",  "0x19: DEBUGGING (IGNORE)",
-                          "0x20: DEBUGGING (IGNORE)",        "P.A.MANAGEMENT : PW REV > 300W",  
-                          "P.A. MANAGEMENT : PA PROTECTION" };
-                          
-const char* headings[] = { 
-          " SETUP OPTIONS vs. IN %s ", 
-          " SET ANTENNA vs. IN %s ",
-          " SET CAT vs. IN %s ",
-          " SET YAESU vs. IN %s ",
-          " SET ICOM vs. IN %s ",
-          " SET TEN-TEC vs. IN %s ",
-          " SET BAUD RATE vs. IN %s ",
-          "[<^] [v>]:SELECT          [SET]:CHANGE",
-          "[<^] [v>]:SELECT         [SET]:CONFIRM"
-};
-
 const char* baud_rate[] = {"1200 Baud","2400 Baud","4800 Baud","9600 Baud"};
 
 const char* setup_options[] = {"ANTENNA","CAT","MANUAL TUNE","BACKLIGHT","CONTEST","BEEP","START","TEMP","QUIT"};
-
-const char* setup_messages[] = {
-  "------- SET ANTENNAS vs. BANDS -------",
-  "----- SET CAT INTERFACE FEATURES -----",
-  "------- MANUAL TUNE OPERATIONS -------",
-  "----- DISPLAY BACKLIGHT SETTINGS -----",
-  "-------- CONTEST MODE On/Off ---------",
-  "------ ACOUSTIC FEEDBACK On/Off ------",
-  "------ SET STARTUP DEFAULT MODE ------",
-  "-- TEMPERATURE VALUE SHOWN IN °C/°F --",
-  "---------- LEAVE THIS MENU -----------"
-};
 
 // Setup options menu items
 //static lv_obj_t *setup_options_items[] {ui_setupAntenna,ui_setupCat,ui_setupManualTune,ui_setupBacklight,ui_setupContest,ui_setupBeep,ui_setupStart,ui_setupTemp,ui_setupQuit};
@@ -1023,116 +983,15 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
       const bool holding_cat_screen = screen == Cat_Screen && scr != Cat_Screen && now < web_cat_snapshot_until;
 
       if (!holding_cat_screen && (screen != scr || packet_in.flags != last_status.flags || cat_hold_expired)) {
-        // Screen has changed, so lets display it, hide everything first.
-        // Need to tidy this, probably create an array of all screen objects?
-        lv_obj_add_flag(ui_receive, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_catStatus, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_manualTune, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_backlight, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_alarmHistory, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_alarmControl, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_warningScreen, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_warningControl, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_setupOptions, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_setupAntOptions, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_setupCatOptions, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_setupYaesuOptions, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_setupIcomOptions, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_setupTenTecOptions, LV_OBJ_FLAG_HIDDEN); 
-        lv_obj_add_flag(ui_setupBaudRateOptions, LV_OBJ_FLAG_HIDDEN); 
-        switch (scr) {
-          case Receive_Screen:
-            if ((packet_in.flags >> 2) & 0x01) {
-              // TX mode
-              lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
-              spe_expert1k_configure_transmit_meters(packet_status);
-              lv_obj_add_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
-            } else {
-              lv_obj_remove_flag(ui_receive, LV_OBJ_FLAG_HIDDEN);
-              lv_obj_remove_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
-            }
-            lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
-            break;
-          case Cat_Screen:
-          {
-            web_cat_snapshot = packet_in;
-            web_cat_snapshot_until = now + cat_display_hold_ms;
-            spe_expert1k_update_cat_screen(packet_in);
-            break;
-          }
-          case Operate_RX:
-          case Operate_TX:
-            lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN); 
-            spe_expert1k_configure_transmit_meters(packet_status);
-            break;
-          case Alarm_History:
-            lv_obj_remove_flag(ui_alarmHistory, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(ui_alarmControl, LV_OBJ_FLAG_HIDDEN);
-            last_status.setup[0]=0xff; // Make sure it updates!
-            break;
-          case Setup_Options:
-            lv_obj_remove_flag(ui_setupOptions, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(ui_setupHeaderText,headings[0],inputs[packet_in.band_input & 0x01]);
-            break;
-          case Set_Antenna:
-            spe_expert1k_show_antenna_setup_screen(packet_in, setup_ant_items, COUNT_OF(setup_ant_items));
-            break;
-          case Set_Cat:
-            lv_obj_remove_flag(ui_setupCatOptions, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(ui_setupCatHeaderText,headings[2],inputs[packet_in.band_input & 0x01]);
-            break;
-          case Set_Yaesu:
-            lv_obj_remove_flag(ui_setupYaesuOptions, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(ui_setupIcomHeaderText,headings[3],inputs[packet_in.band_input & 0x01]);
-            break;
-          case Set_Icom:
-            lv_obj_remove_flag(ui_setupIcomOptions, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(ui_setupIcomHeaderText,headings[4],inputs[packet_in.band_input & 0x01]);
-            break;
-          case Set_TenTec:
-            lv_obj_remove_flag(ui_setupTenTecOptions, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(ui_setupTenTecHeaderText,headings[5],inputs[packet_in.band_input & 0x01]);
-            break;
-          case Set_BaudRate:
-            lv_obj_remove_flag(ui_setupBaudRateOptions, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(ui_setupBaudRateHeaderText,headings[6],inputs[packet_in.band_input & 0x01]);
-            break;
-          case Manual_Tune:
-            lv_obj_remove_flag(ui_manualTune, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
-            break;
-          case Backlight:
-            lv_obj_remove_flag(ui_backlight, LV_OBJ_FLAG_HIDDEN);
-            break;
-          case Shutdown:
-            lv_obj_remove_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text(ui_systemMessageText,"SHUTDOWN");
-            break;
-          case Data_Stored:
-            lv_obj_remove_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text(ui_systemMessageText,"DATA STORED");
-            break;
-          case Warning_V_Low_Half:
-          case Warning_V_Low_Full:
-          case Warning_V_High_Half:
-          case Warning_V_High_Full:
-          case Warning_A_High_Half:
-          case Warning_A_High_Full:
-          case Warning_Temp:
-          case Warning_Over_Driving:
-          case Warning_Reverse:
-          case Warning_Protection:
-            lv_obj_remove_flag(ui_warningScreen, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(ui_warningControl, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(ui_warningText,"%s",warnings[packet_in.display_ctx & 0x0f]);
-            break;
-          default:
-          break;
+        if (scr == Cat_Screen) {
+          web_cat_snapshot = packet_in;
+          web_cat_snapshot_until = now + cat_display_hold_ms;
+        }
+
+        spe_expert1k_hide_status_screens();
+        spe_expert1k_show_screen(scr, packet_in, packet_status, setup_ant_items, COUNT_OF(setup_ant_items));
+        if (scr == Alarm_History) {
+          last_status.setup[0] = 0xff; // Make sure it updates.
         }
         screen = scr;
         if (scr != Cat_Screen) {
@@ -1144,17 +1003,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
 
       if (scr == Alarm_History && last_status.setup[0] != packet_in.setup[0]) 
       {
-        // Refresh warnings as currently displayed has changed.
-        uint8_t wrn_idx = (packet_in.setup[0]) >> 4 & 0x0f;
-        uint8_t wrn_no = packet_in.setup[0] & 0x0f;
-        if (wrn_no && (packet_in.setup[wrn_idx] & 0x0f) < 0x0D)
-          lv_label_set_text_fmt(ui_alarmLine1, "%*d)IN %s %s",2,wrn_idx,inputs[(packet_in.setup[wrn_idx] >> 7) & 0x01],warnings[packet_in.setup[wrn_idx] & 0x0f]);
-        if (wrn_no > 1 && (packet_in.setup[wrn_idx-1] & 0x0f) < 0x0D)
-          lv_label_set_text_fmt(ui_alarmLine2, "%*d)IN %s %s",2,wrn_idx-1,inputs[(packet_in.setup[wrn_idx-1] >> 7) & 0x01],warnings[packet_in.setup[wrn_idx-1] & 0x0f]);
-        if (wrn_no > 2 && (packet_in.setup[wrn_idx-2] & 0x0f) < 0x0D)
-          lv_label_set_text_fmt(ui_alarmLine3, "%*d)IN %s %s",2,wrn_idx-2,inputs[(packet_in.setup[wrn_idx-2] >> 7) & 0x01],warnings[packet_in.setup[wrn_idx-2] & 0x0f]);
-        if (wrn_no > 3 && (packet_in.setup[wrn_idx-3] & 0x0f) < 0x0D)
-          lv_label_set_text_fmt(ui_alarmLine4, "%*d)IN %s %s",2,wrn_idx-3,inputs[(packet_in.setup[wrn_idx-3] >> 7) & 0x01],warnings[packet_in.setup[wrn_idx-3] & 0x0f]);
+        spe_expert1k_update_alarm_history_screen(packet_in);
       } 
 
       if (memcmp(&last_status.setup,&packet_in.setup,sizeof last_status.setup)|| last_status.flags != packet_in.flags)
@@ -1162,14 +1011,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
         // Something has changed!
         if (scr == Setup_Options) 
         {
-          // Setup_Options Menu has changed.
-          lv_label_set_text_fmt(ui_setupFooterText,"%s",setup_messages[packet_in.setup[1] & 0x0f]);        
-          // We need to update the menu options that are changeable
-          lv_label_set_text_fmt(ui_setupContest,"CONTEST %s",onoff[(packet_in.flags >> 5) & 0x01]);
-          lv_label_set_text_fmt(ui_setupBeep,   "BEEP    %s",onoff[(packet_in.flags >> 6) & 0x01]);
-          lv_label_set_text_fmt(ui_setupStart,  "START   %s",startup[(packet_in.flags >> 1) & 0x01]);
-          lv_label_set_text_fmt(ui_setupTemp,   "TEMP    %s",tscales[(packet_in.flags >> 7) & 0x01]);
-
+          spe_expert1k_update_setup_options_screen(packet_in);
           setup_options_ctrl.applySelection(packet_in.setup[1] & 0x0f);
         }
         else if (scr == Set_Antenna) 

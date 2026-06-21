@@ -12,6 +12,7 @@
 #include <ui.h>
 
 #include "console/serial_console.h"
+#include "models/spe_expert1k/menuitems.h"
 
 #define COUNT_OF_LOCAL(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
@@ -26,8 +27,38 @@ static const char * const cat_yaesu[] = {"FT 100", "FT 757 GX2", "FT 817/847", "
                                          "FT 1000 MP2", "FT 1000 MP3", "FT 2000", "FT 9000D", "BAND_DATA"};
 static const char * const cat_tentec[] = {"OMNI VII", "ORION I/II", "JUPITER", "ARGONAUT"};
 static const char * const inputs[] = {"1", "2"};
+static const char * const tscales[] = {"°F", "°C"};
+static const char * const startup[] = {"Standby", "Operate"};
+static const char * const onoff[] = {"Off", "On "};
 static const char * const ordinals[] = {"1st", "2nd", "3rd", "4th"};
 static const char * const ant_num[] = {" 1", " 2", " 3", " 4", "NO"};
+static const char * const warnings[] = {"0x10: DEBUGGING (IGNORE)", "POWER MANAGEMENT : V PA < 20 V",
+                                        "POWER MANAGEMENT : V PA < 26 V", "POWER MANAGEMENT : V PA > 50 V",
+                                        "POWER MANAGEMENT : V PA > 50 V", "POWER MANAGEMENT : I PA > 40 A",
+                                        "POWER MANAGEMENT : I PA > 50 A", "OVER TEMPERATURE : TEMP > 90°C",
+                                        "P.A. MANAGEMENT : OVER DRIVING", "0x19: DEBUGGING (IGNORE)",
+                                        "0x20: DEBUGGING (IGNORE)", "P.A.MANAGEMENT : PW REV > 300W",
+                                        "P.A. MANAGEMENT : PA PROTECTION"};
+static const char * const headings[] = {
+  " SETUP OPTIONS vs. IN %s ",
+  " SET ANTENNA vs. IN %s ",
+  " SET CAT vs. IN %s ",
+  " SET YAESU vs. IN %s ",
+  " SET ICOM vs. IN %s ",
+  " SET TEN-TEC vs. IN %s ",
+  " SET BAUD RATE vs. IN %s "
+};
+static const char * const setup_messages[] = {
+  "------- SET ANTENNAS vs. BANDS -------",
+  "----- SET CAT INTERFACE FEATURES -----",
+  "------- MANUAL TUNE OPERATIONS -------",
+  "----- DISPLAY BACKLIGHT SETTINGS -----",
+  "-------- CONTEST MODE On/Off ---------",
+  "------ ACOUSTIC FEEDBACK On/Off ------",
+  "------ SET STARTUP DEFAULT MODE ------",
+  "-- TEMPERATURE VALUE SHOWN IN °C/°F --",
+  "---------- LEAVE THIS MENU -----------"
+};
 static const char * const antenna_heading = " SET ANTENNA vs. IN %s ";
 static const char * const antenna_select_footer = "[<^] [v>]:SELECT          [SET]:CHANGE";
 static const char * const antenna_save_footer = "[<^] [v>]:SELECT         [SET]:CONFIRM";
@@ -57,6 +88,19 @@ static lv_obj_t *ui_powerScaleLabels[5] = {};
 static lv_obj_t *ui_paScaleLabels[5] = {};
 static lv_obj_t *ui_powerScaleTicks[meter_tick_count] = {};
 static lv_obj_t *ui_paScaleTicks[meter_tick_count] = {};
+
+static const char *warning_text(uint8_t index)
+{
+  if (index >= COUNT_OF_LOCAL(warnings)) {
+    return "";
+  }
+  return warnings[index];
+}
+
+static void update_cat_screen(const Expert_Packet &packet);
+static void show_antenna_setup_screen(const Expert_Packet &packet,
+                                      lv_obj_t * const antenna_items[],
+                                      size_t antenna_item_count);
 
 static lv_obj_t *create_meter_scale_tick(lv_obj_t *parent, uint8_t index, int y_offset)
 {
@@ -119,7 +163,138 @@ void spe_expert1k_configure_transmit_meters(const AmpStatusSnapshot &status)
   }
 }
 
-void spe_expert1k_update_cat_screen(const Expert_Packet &packet)
+void spe_expert1k_hide_status_screens()
+{
+  lv_obj_add_flag(ui_receive, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_catStatus, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_manualTune, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_backlight, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_alarmHistory, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_alarmControl, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_warningScreen, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_warningControl, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_setupOptions, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_setupAntOptions, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_setupCatOptions, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_setupYaesuOptions, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_setupIcomOptions, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_setupTenTecOptions, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(ui_setupBaudRateOptions, LV_OBJ_FLAG_HIDDEN);
+}
+
+void spe_expert1k_show_screen(ExpertScreen screen,
+                              const Expert_Packet &packet,
+                              const AmpStatusSnapshot &status,
+                              lv_obj_t * const antenna_items[],
+                              size_t antenna_item_count)
+{
+  switch (screen) {
+    case Receive_Screen:
+      if ((packet.flags >> 2) & 0x01) {
+        lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
+        spe_expert1k_configure_transmit_meters(status);
+        lv_obj_add_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_remove_flag(ui_receive, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN);
+      }
+      lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+      break;
+
+    case Cat_Screen:
+      update_cat_screen(packet);
+      break;
+
+    case Operate_RX:
+    case Operate_TX:
+      lv_obj_remove_flag(ui_transmit, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(ui_txVoltageContainer, LV_OBJ_FLAG_HIDDEN);
+      spe_expert1k_configure_transmit_meters(status);
+      break;
+
+    case Alarm_History:
+      lv_obj_remove_flag(ui_alarmHistory, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(ui_alarmControl, LV_OBJ_FLAG_HIDDEN);
+      break;
+
+    case Setup_Options:
+      lv_obj_remove_flag(ui_setupOptions, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text_fmt(ui_setupHeaderText, headings[0], inputs[packet.band_input & 0x01]);
+      break;
+
+    case Set_Antenna:
+      show_antenna_setup_screen(packet, antenna_items, antenna_item_count);
+      break;
+
+    case Set_Cat:
+      lv_obj_remove_flag(ui_setupCatOptions, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text_fmt(ui_setupCatHeaderText, headings[2], inputs[packet.band_input & 0x01]);
+      break;
+
+    case Set_Yaesu:
+      lv_obj_remove_flag(ui_setupYaesuOptions, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text_fmt(ui_setupIcomHeaderText, headings[3], inputs[packet.band_input & 0x01]);
+      break;
+
+    case Set_Icom:
+      lv_obj_remove_flag(ui_setupIcomOptions, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text_fmt(ui_setupIcomHeaderText, headings[4], inputs[packet.band_input & 0x01]);
+      break;
+
+    case Set_TenTec:
+      lv_obj_remove_flag(ui_setupTenTecOptions, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text_fmt(ui_setupTenTecHeaderText, headings[5], inputs[packet.band_input & 0x01]);
+      break;
+
+    case Set_BaudRate:
+      lv_obj_remove_flag(ui_setupBaudRateOptions, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text_fmt(ui_setupBaudRateHeaderText, headings[6], inputs[packet.band_input & 0x01]);
+      break;
+
+    case Manual_Tune:
+      lv_obj_remove_flag(ui_manualTune, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+      break;
+
+    case Backlight:
+      lv_obj_remove_flag(ui_backlight, LV_OBJ_FLAG_HIDDEN);
+      break;
+
+    case Shutdown:
+      lv_obj_remove_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text(ui_systemMessageText, "SHUTDOWN");
+      break;
+
+    case Data_Stored:
+      lv_obj_remove_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text(ui_systemMessageText, "DATA STORED");
+      break;
+
+    case Warning_V_Low_Half:
+    case Warning_V_Low_Full:
+    case Warning_V_High_Half:
+    case Warning_V_High_Full:
+    case Warning_A_High_Half:
+    case Warning_A_High_Full:
+    case Warning_Temp:
+    case Warning_Over_Driving:
+    case Warning_Reverse:
+    case Warning_Protection:
+      lv_obj_remove_flag(ui_warningScreen, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(ui_warningControl, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text_fmt(ui_warningText, "%s", warning_text(packet.display_ctx & 0x0f));
+      break;
+
+    default:
+      break;
+  }
+}
+
+static void update_cat_screen(const Expert_Packet &packet)
 {
   lv_obj_remove_flag(ui_catStatus, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
@@ -187,9 +362,36 @@ static const char *antenna_label(uint8_t raw)
   return ant_num[raw];
 }
 
-void spe_expert1k_show_antenna_setup_screen(const Expert_Packet &packet,
-                                            lv_obj_t * const antenna_items[],
-                                            size_t antenna_item_count)
+static void update_alarm_line(lv_obj_t *line, const Expert_Packet &packet, uint8_t wrn_idx, uint8_t offset)
+{
+  if (wrn_idx < offset) {
+    return;
+  }
+
+  const uint8_t setup_idx = wrn_idx - offset;
+  if ((packet.setup[setup_idx] & 0x0f) >= COUNT_OF_LOCAL(warnings)) {
+    return;
+  }
+
+  lv_label_set_text_fmt(line, "%*d)IN %s %s", 2, setup_idx,
+                        inputs[(packet.setup[setup_idx] >> 7) & 0x01],
+                        warning_text(packet.setup[setup_idx] & 0x0f));
+}
+
+static void update_alarm_line_if_present(lv_obj_t *line,
+                                         const Expert_Packet &packet,
+                                         uint8_t wrn_idx,
+                                         uint8_t wrn_no,
+                                         uint8_t offset)
+{
+  if (wrn_no > offset) {
+    update_alarm_line(line, packet, wrn_idx, offset);
+  }
+}
+
+static void show_antenna_setup_screen(const Expert_Packet &packet,
+                                      lv_obj_t * const antenna_items[],
+                                      size_t antenna_item_count)
 {
   lv_obj_remove_flag(ui_setupAntOptions, LV_OBJ_FLAG_HIDDEN);
   lv_label_set_text_fmt(ui_setupAntHeaderText, antenna_heading, inputs[packet.band_input & 0x01]);
@@ -239,6 +441,29 @@ uint8_t spe_expert1k_update_antenna_setup_screen(const Expert_Packet &packet,
   }
 
   return index;
+}
+
+void spe_expert1k_update_alarm_history_screen(const Expert_Packet &packet)
+{
+  const uint8_t wrn_idx = (packet.setup[0] >> 4) & 0x0f;
+  const uint8_t wrn_no = packet.setup[0] & 0x0f;
+
+  update_alarm_line_if_present(ui_alarmLine1, packet, wrn_idx, wrn_no, 0);
+  update_alarm_line_if_present(ui_alarmLine2, packet, wrn_idx, wrn_no, 1);
+  update_alarm_line_if_present(ui_alarmLine3, packet, wrn_idx, wrn_no, 2);
+  update_alarm_line_if_present(ui_alarmLine4, packet, wrn_idx, wrn_no, 3);
+}
+
+void spe_expert1k_update_setup_options_screen(const Expert_Packet &packet)
+{
+  const uint8_t selection = packet.setup[1] & 0x0f;
+  const char *message = selection < COUNT_OF_LOCAL(setup_messages) ? setup_messages[selection] : "";
+
+  lv_label_set_text_fmt(ui_setupFooterText, "%s", message);
+  lv_label_set_text_fmt(ui_setupContest, "CONTEST %s", onoff[(packet.flags >> 5) & 0x01]);
+  lv_label_set_text_fmt(ui_setupBeep, "BEEP    %s", onoff[(packet.flags >> 6) & 0x01]);
+  lv_label_set_text_fmt(ui_setupStart, "START   %s", startup[(packet.flags >> 1) & 0x01]);
+  lv_label_set_text_fmt(ui_setupTemp, "TEMP    %s", tscales[(packet.flags >> 7) & 0x01]);
 }
 
 void spe_expert1k_update_manual_tune_screen(const Expert_Packet &packet)
