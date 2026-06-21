@@ -9,6 +9,8 @@
 #ifndef _UI_EVENTS_H
 #define _UI_EVENTS_H
 
+#include "lvgl.h"
+
 void button_pressed(lv_event_t * e);
 
 #endif
