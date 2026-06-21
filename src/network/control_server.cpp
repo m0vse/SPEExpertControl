@@ -159,7 +159,7 @@ private:
         }
 
         client.flush();
-        delay(25);
+        delay(1);
         client.stop();
     }
 
@@ -200,9 +200,15 @@ private:
             name.remove(end);
         }
 
+        const uint32_t start_sequence = app_status_sequence();
         const bool ok = amp_control_press_key(name.c_str());
         if (!ok) {
             updateStats([](ControlServerStats &s) { ++s.bad_key_requests; });
+        } else {
+            const unsigned long wait_started = millis();
+            while (millis() - wait_started < 900 && app_status_sequence() == start_sequence) {
+                rtos::ThisThread::sleep_for(std::chrono::milliseconds(20));
+            }
         }
         client.println(ok ? F("HTTP/1.1 200 OK") : F("HTTP/1.1 400 Bad Request"));
         client.println(F("Content-Type: application/json"));
@@ -212,7 +218,15 @@ private:
         client.print(ok ? F("true") : F("false"));
         client.print(F(",\"key\":\""));
         client.print(name);
-        client.println(F("\"}"));
+        client.print(F("\",\"wifi\":{\"status\":\"connected\",\"ssid\":\""));
+        client.print(WiFi.SSID());
+        client.print(F("\",\"ip\":\""));
+        client.print(WiFi.localIP());
+        client.print(F("\",\"rssi\":"));
+        client.print(WiFi.RSSI());
+        client.print(F("},\"amp\":"));
+        app_status_print_json(client);
+        client.println(F("}"));
     }
 
     void sendIndex(WiFiClient &client)
@@ -236,7 +250,7 @@ private:
         client.println(F("function antScreen(a,st){let idx=Math.min(st[0]||0,20),h='<div class=\"cap\"> SET ANTENNA vs. IN '+e(a.input)+' </div>';let groups=[[0,255,0,4],[270,235,4,8],[530,235,8,10]];for(let g of groups){h+='<div class=\"antc\" style=\"left:'+g[0]+'px;width:'+g[1]+'px\">';for(let i=g[2];i<g[3];i++){h+='<div class=\"antrow\"><span style=\"left:0px;top:0px\">'+(i<4?['160 m:',' 80 m:',' 40 m:',' 30 m:'][i]:i<8?['20 m:','17 m:','15 m:','12 m:'][i-4]:['10 m:',' 6 m:'][i-8])+'</span><span class=\"'+(idx==i*2?'sel':'')+'\" style=\"left:'+(g[0]?100:120)+'px;top:0px;width:55px\">'+e(ant[(st[i+1]&7)]||'?')+'</span><span class=\"'+(idx==i*2+1?'sel':'')+'\" style=\"left:'+(g[0]?165:185)+'px;top:0px;width:55px\">'+e(ant[((st[i+1]>>4)&7)]||'?')+'</span></div>'}if(g[0]==530)h+='<span class=\"'+(idx==20?'sel':'')+'\" style=\"position:absolute;left:110px;top:90px;width:110px;padding-left:15px\">SAVE</span>';h+='</div>'}let b=Math.min(Math.floor(idx/2),10),ord=idx%2,am=['--- Set 1st ANTENNA FOR 160 m BAND ---','---- Set 1st ANTENNA FOR 80 m BAND ---','---- Set 1st ANTENNA FOR 40 m BAND ---','---- Set 1st ANTENNA FOR 30 m BAND ---','---- Set 1st ANTENNA FOR 20 m BAND ---','---- Set 1st ANTENNA FOR 17 m BAND ---','---- Set 1st ANTENNA FOR 15 m BAND ---','---- Set 1st ANTENNA FOR 12 m BAND ---','---- Set 1st ANTENNA FOR 10 m BAND ---','---- Set 1st ANTENNA FOR 6 m BAND ----','------- SAVE SETTINGS AND EXIT -------'];if(idx<20&&ord)am[b]=am[b].replace('1st','2nd');h+=div('line',7,163,e(am[b]))+div('line',7,196,idx==20?'[&lt;^] [v&gt;]:SELECT         [SET]:CONFIRM':'[&lt;^] [v&gt;]:SELECT          [SET]:CHANGE');setTop('setup',h);setAmp(a,false)}"));
         client.println(F("function listSetup(a,title,items,sel,foot){let h='<div class=\"cap\"> '+title+' vs. IN '+e(a.input)+' </div>';for(let i=0;i<items.length;i++)h+=div('menuitem '+(i==sel?'sel':''),i<4?0:285,i<4?45+i*30:45+(i-4)*30,e(items[i]));h+=div('line',7,163,foot)+div('line',7,196,'[&lt;^] [v&gt;]:SELECT         [SET]:CONFIRM');setTop('setup',h);setAmp(a,false)}function manual(a,st){setTop('',div('line',7,25,'FREQ:')+div('line',160,25,(a.freq/1000).toFixed(3)+' MHz')+div('line',555,25,'SUB BAND:')+div('line',695,25,e(a.subBand))+div('line',7,55,'L:')+bar(147,60,273,127,st[1]||0)+div('line',510,55,((st[1]||0)/10).toFixed(1)+' uH')+div('line',7,85,'C:')+bar(147,90,273,2760,Number(pF(st)))+div('line',510,85,pF(st)+' pF'));setAmp(a,true)}"));
         client.println(F("function render(a){let st=a.setup||[],sn=a.screenName,sel=st[1]||0;if(!a.valid){setTop('',div('line sel',290,65,' INITIALIZING '));setAmp(a,false);return}if(sn=='receive')return receive(a);if(sn=='operate_rx'||sn=='operate_tx')return tx(a);if(sn=='cat')return catScreen(a,st);if(sn=='setup_options')return setupItems(a,st);if(sn=='set_antenna')return antScreen(a,st);if(sn=='set_cat')return listSetup(a,'SET CAT',cats,sel,'--------- SET CAT INTERFACE ----------');if(sn=='set_yaesu')return listSetup(a,'SET YAESU',yaesu,sel,'------- SET PROPER YAESU MODEL -------');if(sn=='set_icom')return listSetup(a,'SET ICOM',icom,sel,'----- SET PROPER ICOM INTERFACE ------');if(sn=='set_tentec')return listSetup(a,'SETUP TEN-TEC',tt,sel,'------ SET PROPER TEN-TEC MODEL ------');if(sn=='set_baudrate')return listSetup(a,'SET BAUD RATE',baud,sel,'-------- SET PROPER BAUD RATE --------');if(sn=='manual_tune')return manual(a,st);if(sn=='backlight'){setTop('setup','<div class=\"cap\"> DISPLAY BACKLIGHT </div>'+bar(205,75,354,255,st[1]||0)+div('line',7,163,'-------------- SETTINGS --------------')+div('line',7,196,'[&lt;^] [v&gt;]:ADJUST            [SET]:SAVE'));setAmp(a,false);return}if(sn=='alarm_history'){let n=st[0]&15,i=(st[0]>>4)&15,h='<div class=\"cap\"> ALARM HISTORY </div>';for(let x=0;x<4;x++){let j=i-x;if(n>x&&j>=0)h+=div('line',0,26+x*30,e(j+')IN '+(((st[j]>>7)&1)+1)+' '+(warn[st[j]&15]||'')))}setTop('',h);document.getElementById('amp').outerHTML='<div id=\"amp\" class=\"warnctl\"><div style=\"width:235px\">[&lt;^] [v&gt;]<br>SCROLL</div><div style=\"width:325px\">[TUNE] &amp; [OP]<br>CLEAR LIST</div><div style=\"width:220px;border-right:0\">[DISPLAY]<br>QUIT</div></div>';return}if(sn=='shutdown'||sn=='data_stored'){setTop('setup','<div class=\"cap\"> SYSTEM MESSAGE </div>'+div('line center',0,110,sn.toUpperCase().replace('_',' ')));setAmp(a,false);return}if(a.screen>=17&&a.screen<=28){setTop('', '<div class=\"cap\"> WARNING! </div>'+div('line',0,57,e(warn[a.displayCtx&15]||'')));document.getElementById('amp').outerHTML='<div id=\"amp\" class=\"warnctl\"><div style=\"width:790px;border-right:0\">[DISPLAY]<br>RESET ALARM</div></div>';return}setTop('',div('line',0,60,e(sn)));setAmp(a,false)}"));
-        client.println(F("let busy=false,commandPending=false,fail=0;function setBusy(v){commandPending=v;document.querySelectorAll('button[data-k]').forEach(b=>b.disabled=v);if(v)s('screen','BUSY')}async function u(){if(busy)return;busy=true;try{let r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error(r.status);let j=await r.json(),a=j.amp,w=j.wifi;fail=0;s('screen',a.valid?a.screenName:'WAITING FOR AMP');render(a);s('wifi',w.ssid||w.status);s('ip',w.ip);s('rssi',w.rssi+' dBm');if(commandPending)setBusy(false)}catch(e){if(++fail>=4){s('screen','OFFLINE');setTop('',div('line sel',330,65,' OFFLINE '));setAmp({},false)}}finally{busy=false}}async function k(b){if(commandPending)return;b.classList.add('hit');setBusy(true);try{let r=await fetch('/api/key?name='+b.dataset.k,{cache:'no-store'});if(!r.ok)throw Error(r.status)}catch(e){setBusy(false);throw e}finally{setTimeout(()=>b.classList.remove('hit'),160);setTimeout(u,250)}}document.querySelectorAll('button[data-k]').forEach(b=>b.onclick=()=>k(b));u();setInterval(u,1500)</script></body></html>"));
+        client.println(F("let busy=false,commandPending=false,fail=0,fastUntil=0,pollTimer=0;function nextPoll(ms){clearTimeout(pollTimer);pollTimer=setTimeout(u,ms)}function draw(j){let a=j.amp,w=j.wifi;fail=0;s('screen',a.valid?a.screenName:'WAITING FOR AMP');render(a);s('wifi',w.ssid||w.status);s('ip',w.ip);s('rssi',w.rssi+' dBm');if(commandPending)setBusy(false)}function setBusy(v){commandPending=v;document.querySelectorAll('button[data-k]').forEach(b=>b.disabled=v);if(v)s('screen','BUSY')}async function u(){if(busy)return;busy=true;try{let r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error(r.status);draw(await r.json())}catch(e){if(++fail>=4){s('screen','OFFLINE');setTop('',div('line sel',330,65,' OFFLINE '));setAmp({},false)}}finally{busy=false;nextPoll(Date.now()<fastUntil?120:1500)}}async function k(b){if(commandPending)return;b.classList.add('hit');setBusy(true);fastUntil=Date.now()+1400;try{let r=await fetch('/api/key?name='+b.dataset.k,{cache:'no-store'});if(!r.ok)throw Error(r.status);draw(await r.json());nextPoll(120)}catch(e){setBusy(false);throw e}finally{setTimeout(()=>b.classList.remove('hit'),160)}}document.querySelectorAll('button[data-k]').forEach(b=>b.onclick=()=>k(b));u()</script></body></html>"));
     }
 
     WiFiServer server_{80};

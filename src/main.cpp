@@ -62,10 +62,12 @@ uint8_t progress = 0;
 #define COUNT_OF(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
 void process_packet(const Expert_Packet &packet_in, uint8_t len_in);
-void send_command(std::initializer_list<uint8_t> cmd);
+bool send_command(std::initializer_list<uint8_t> cmd);
 void button_pressed(lv_event_t * e);
+static void amp_dtr_set(bool asserted);
 void ui_task(void);
 void serial_task(void);
+void console_task(void);
 void wifi_task(void);
 void web_task(void);
 
@@ -180,11 +182,11 @@ public:
         }
         break;
       case Len:
-        if (value <= MAX_DATA) {
+        if (value == 1 || value == MAX_DATA) {
           length_ = value;
           state_ = Data;
         } else {
-          reset();
+          resetFromUnexpected(value);
         }
         bytes_ = 0x00;
         break;
@@ -200,7 +202,10 @@ public:
           resetState();
           return Result::PacketReady;
         }
-        reset();
+        invalid_length_ = length_;
+        invalid_expected_checksum_ = checksum_;
+        invalid_received_checksum_ = value;
+        resetFromUnexpected(value);
         return Result::InvalidChecksum;
     }
 
@@ -209,6 +214,9 @@ public:
 
   const Expert_Packet &packet() const { return packet_; }
   uint8_t length() const { return length_; }
+  uint8_t invalidLength() const { return invalid_length_; }
+  uint8_t invalidExpectedChecksum() const { return invalid_expected_checksum_; }
+  uint8_t invalidReceivedChecksum() const { return invalid_received_checksum_; }
 
 private:
   void reset()
@@ -224,11 +232,22 @@ private:
     state_ = Sync;
   }
 
+  void resetFromUnexpected(uint8_t value)
+  {
+    reset();
+    if (value == 0xAA) {
+      bytes_ = 0x01;
+    }
+  }
+
   ExpertStatus state_ = Sync;
   Expert_Packet packet_{};
   uint8_t bytes_ = 0x00;
   uint8_t checksum_ = 0x00;
   uint8_t length_ = 0x00;
+  uint8_t invalid_length_ = 0x00;
+  uint8_t invalid_expected_checksum_ = 0x00;
+  uint8_t invalid_received_checksum_ = 0x00;
 };
 
 // Setup options menu items
@@ -272,6 +291,7 @@ static ExpertScreen published_screen = BootMessage;
 static Expert_Packet published_last_status{};
 static Expert_Packet published_web_cat_snapshot{};
 static unsigned long published_web_cat_snapshot_until = 0;
+static uint32_t published_status_sequence = 0;
 int transformed_touch_devices = 0;
 unsigned long last_console_status = 0;
 static char console_line[96];
@@ -284,16 +304,55 @@ struct AmpSerialStats {
   uint32_t invalid_checksums = 0;
   uint32_t commands_sent = 0;
   uint32_t max_available = 0;
+  uint32_t max_task_gap_ms = 0;
+  uint32_t max_rx_byte_gap_us = 0;
+  uint32_t max_drain_burst = 0;
+  uint32_t queued_packets_dropped = 0;
+  uint32_t max_queue_depth = 0;
+  uint32_t queued_commands_dropped = 0;
+  uint32_t max_command_queue_depth = 0;
   uint32_t last_checksum_error_ms = 0;
+  uint32_t checksum_sync_resyncs = 0;
+  uint32_t last_bad_available = 0;
+  uint8_t last_bad_packet_len = 0;
+  uint8_t last_bad_checksum_expected = 0;
+  uint8_t last_bad_checksum_received = 0;
 };
 static AmpSerialStats amp_serial_stats;
+static const uint8_t AMP_PACKET_QUEUE_SIZE = 8;
+static const uint8_t AMP_COMMAND_QUEUE_SIZE = 16;
+static const uint8_t AMP_COMMAND_MAX_LEN = 4;
+struct QueuedAmpPacket {
+  Expert_Packet packet;
+  uint8_t len = 0;
+};
+enum class AmpCommandPostAction : uint8_t {
+  None,
+  DeassertDtr
+};
+struct QueuedAmpCommand {
+  uint8_t data[AMP_COMMAND_MAX_LEN]{};
+  uint8_t len = 0;
+  AmpCommandPostAction post_action = AmpCommandPostAction::None;
+};
+static QueuedAmpPacket amp_packet_queue[AMP_PACKET_QUEUE_SIZE];
+static uint8_t amp_packet_queue_head = 0;
+static uint8_t amp_packet_queue_tail = 0;
+static uint8_t amp_packet_queue_count = 0;
+static QueuedAmpCommand amp_command_queue[AMP_COMMAND_QUEUE_SIZE];
+static uint8_t amp_command_queue_head = 0;
+static uint8_t amp_command_queue_tail = 0;
+static uint8_t amp_command_queue_count = 0;
 static rtos::Mutex lvgl_mutex;
 static rtos::Mutex amp_serial_mutex;
 static rtos::Mutex debug_serial_mutex;
 static rtos::Mutex amp_status_mutex;
 static rtos::Mutex amp_serial_stats_mutex;
+static rtos::Mutex amp_packet_queue_mutex;
+static rtos::Mutex amp_command_queue_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
-static rtos::Thread serial_thread(osPriorityAboveNormal, 8192, nullptr, "amp");
+static rtos::Thread serial_thread(osPriorityHigh, 8192, nullptr, "amp");
+static rtos::Thread console_thread(osPriorityBelowNormal, 4096, nullptr, "console");
 static rtos::Thread wifi_thread(osPriorityNormal, 8192, nullptr, "wifi");
 static rtos::Thread web_thread(osPriorityBelowNormal, 8192, nullptr, "web");
 
@@ -327,6 +386,18 @@ public:
   ~AmpSerialStatsLock() { amp_serial_stats_mutex.unlock(); }
 };
 
+class AmpPacketQueueLock {
+public:
+  AmpPacketQueueLock() { amp_packet_queue_mutex.lock(); }
+  ~AmpPacketQueueLock() { amp_packet_queue_mutex.unlock(); }
+};
+
+class AmpCommandQueueLock {
+public:
+  AmpCommandQueueLock() { amp_command_queue_mutex.lock(); }
+  ~AmpCommandQueueLock() { amp_command_queue_mutex.unlock(); }
+};
+
 static void amp_serial_note_available(uint32_t available)
 {
   AmpSerialStatsLock lock;
@@ -335,10 +406,34 @@ static void amp_serial_note_available(uint32_t available)
   }
 }
 
-static void amp_serial_note_rx_byte()
+static void amp_serial_note_task_gap(uint32_t gap_ms)
+{
+  AmpSerialStatsLock lock;
+  if (gap_ms > amp_serial_stats.max_task_gap_ms) {
+    amp_serial_stats.max_task_gap_ms = gap_ms;
+  }
+}
+
+static void amp_serial_note_drain_burst(uint32_t bytes)
+{
+  AmpSerialStatsLock lock;
+  if (bytes > amp_serial_stats.max_drain_burst) {
+    amp_serial_stats.max_drain_burst = bytes;
+  }
+}
+
+static void amp_serial_note_rx_byte(uint32_t now_us)
 {
   AmpSerialStatsLock lock;
   ++amp_serial_stats.rx_bytes;
+  static uint32_t last_rx_us = 0;
+  if (last_rx_us != 0) {
+    const uint32_t gap_us = now_us - last_rx_us;
+    if (gap_us > amp_serial_stats.max_rx_byte_gap_us) {
+      amp_serial_stats.max_rx_byte_gap_us = gap_us;
+    }
+  }
+  last_rx_us = now_us;
 }
 
 static void amp_serial_note_valid_packet()
@@ -347,17 +442,136 @@ static void amp_serial_note_valid_packet()
   ++amp_serial_stats.valid_packets;
 }
 
-static void amp_serial_note_invalid_checksum()
+static void amp_serial_note_invalid_checksum(uint8_t len, uint8_t expected, uint8_t received, uint32_t available)
 {
   AmpSerialStatsLock lock;
   ++amp_serial_stats.invalid_checksums;
   amp_serial_stats.last_checksum_error_ms = millis();
+  if (received == 0xAA) {
+    ++amp_serial_stats.checksum_sync_resyncs;
+  }
+  amp_serial_stats.last_bad_available = available;
+  amp_serial_stats.last_bad_packet_len = len;
+  amp_serial_stats.last_bad_checksum_expected = expected;
+  amp_serial_stats.last_bad_checksum_received = received;
 }
 
 static void amp_serial_note_command()
 {
   AmpSerialStatsLock lock;
   ++amp_serial_stats.commands_sent;
+}
+
+static void amp_serial_note_packet_drop()
+{
+  AmpSerialStatsLock lock;
+  ++amp_serial_stats.queued_packets_dropped;
+}
+
+static void amp_serial_note_queue_depth(uint32_t depth)
+{
+  AmpSerialStatsLock lock;
+  if (depth > amp_serial_stats.max_queue_depth) {
+    amp_serial_stats.max_queue_depth = depth;
+  }
+}
+
+static void amp_serial_note_command_drop()
+{
+  AmpSerialStatsLock lock;
+  ++amp_serial_stats.queued_commands_dropped;
+}
+
+static void amp_serial_note_command_queue_depth(uint32_t depth)
+{
+  AmpSerialStatsLock lock;
+  if (depth > amp_serial_stats.max_command_queue_depth) {
+    amp_serial_stats.max_command_queue_depth = depth;
+  }
+}
+
+static void queue_amp_packet(const Expert_Packet &packet, uint8_t len)
+{
+  uint8_t depth = 0;
+  {
+    AmpPacketQueueLock lock;
+    if (amp_packet_queue_count >= AMP_PACKET_QUEUE_SIZE) {
+      amp_packet_queue_tail = (amp_packet_queue_tail + 1) % AMP_PACKET_QUEUE_SIZE;
+      --amp_packet_queue_count;
+      amp_serial_note_packet_drop();
+    }
+
+    amp_packet_queue[amp_packet_queue_head].packet = packet;
+    amp_packet_queue[amp_packet_queue_head].len = len;
+    amp_packet_queue_head = (amp_packet_queue_head + 1) % AMP_PACKET_QUEUE_SIZE;
+    ++amp_packet_queue_count;
+    depth = amp_packet_queue_count;
+  }
+  amp_serial_note_queue_depth(depth);
+}
+
+static bool queue_amp_command(std::initializer_list<uint8_t> cmd, AmpCommandPostAction post_action = AmpCommandPostAction::None)
+{
+  if (cmd.size() == 0 || cmd.size() > AMP_COMMAND_MAX_LEN) {
+    return false;
+  }
+
+  uint8_t depth = 0;
+  {
+    AmpCommandQueueLock lock;
+    if (amp_command_queue_count >= AMP_COMMAND_QUEUE_SIZE) {
+      amp_serial_note_command_drop();
+      return false;
+    }
+
+    QueuedAmpCommand &queued = amp_command_queue[amp_command_queue_head];
+    queued.len = static_cast<uint8_t>(cmd.size());
+    queued.post_action = post_action;
+    uint8_t i = 0;
+    for (uint8_t c : cmd) {
+      queued.data[i++] = c;
+    }
+
+    amp_command_queue_head = (amp_command_queue_head + 1) % AMP_COMMAND_QUEUE_SIZE;
+    ++amp_command_queue_count;
+    depth = amp_command_queue_count;
+  }
+  amp_serial_note_command_queue_depth(depth);
+  return true;
+}
+
+static bool dequeue_amp_packet(QueuedAmpPacket &queued)
+{
+  AmpPacketQueueLock lock;
+  if (amp_packet_queue_count == 0) {
+    return false;
+  }
+
+  queued = amp_packet_queue[amp_packet_queue_tail];
+  amp_packet_queue_tail = (amp_packet_queue_tail + 1) % AMP_PACKET_QUEUE_SIZE;
+  --amp_packet_queue_count;
+  return true;
+}
+
+static bool dequeue_amp_command(QueuedAmpCommand &queued)
+{
+  AmpCommandQueueLock lock;
+  if (amp_command_queue_count == 0) {
+    return false;
+  }
+
+  queued = amp_command_queue[amp_command_queue_tail];
+  amp_command_queue_tail = (amp_command_queue_tail + 1) % AMP_COMMAND_QUEUE_SIZE;
+  --amp_command_queue_count;
+  return true;
+}
+
+static void process_next_queued_amp_packet()
+{
+  QueuedAmpPacket queued;
+  if (dequeue_amp_packet(queued)) {
+    process_packet(queued.packet, queued.len);
+  }
 }
 
 class AmpSerialLink {
@@ -372,7 +586,8 @@ public:
   {
     AmpSerialLock lock;
     const int available_bytes = Serial1.available();
-    amp_serial_note_available(available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes));
+    last_available_ = available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes);
+    amp_serial_note_available(last_available_);
     return available_bytes;
   }
 
@@ -382,29 +597,35 @@ public:
     {
       AmpSerialLock lock;
       const int available_bytes = Serial1.available();
-      amp_serial_note_available(available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes));
+      last_available_ = available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes);
+      amp_serial_note_available(last_available_);
       if (available_bytes <= 0) {
         return false;
       }
       value = Serial1.read();
     }
 
-    amp_serial_note_rx_byte();
+    amp_serial_note_rx_byte(micros());
     result = parser_.read(static_cast<uint8_t>(value));
     return true;
   }
 
   const Expert_Packet &packet() const { return parser_.packet(); }
   uint8_t length() const { return parser_.length(); }
+  uint8_t invalidLength() const { return parser_.invalidLength(); }
+  uint8_t invalidExpectedChecksum() const { return parser_.invalidExpectedChecksum(); }
+  uint8_t invalidReceivedChecksum() const { return parser_.invalidReceivedChecksum(); }
+  uint32_t lastAvailable() const { return last_available_; }
 
-  void send(std::initializer_list<uint8_t> cmd)
+  void send(const uint8_t *cmd, uint8_t len)
   {
     AmpSerialLock lock;
     amp_serial_note_command();
     Serial1.write(0x55); Serial1.write(0x55); Serial1.write(0x55);
-    Serial1.write(cmd.size() & 0xff);
+    Serial1.write(len & 0xff);
     uint8_t sum = 0;
-    for (uint8_t c : cmd) {
+    for (uint8_t i = 0; i < len; ++i) {
+      const uint8_t c = cmd[i];
       Serial1.write(c);
       sum += c;
     }
@@ -413,9 +634,9 @@ public:
 #if SPE_VERBOSE_PACKET_LOG
     DebugSerialLock debug_lock;
     Serial.print(F("TX command:"));
-    for (uint8_t c : cmd) {
+    for (uint8_t i = 0; i < len; ++i) {
       Serial.print(' ');
-      Serial.print(c, HEX);
+      Serial.print(cmd[i], HEX);
     }
     Serial.println();
 #endif
@@ -423,9 +644,23 @@ public:
 
 private:
   ExpertPacketParser parser_;
+  uint32_t last_available_ = 0;
 };
 
 static AmpSerialLink amp_serial;
+
+static void process_next_queued_amp_command()
+{
+  QueuedAmpCommand queued;
+  if (!dequeue_amp_command(queued)) {
+    return;
+  }
+
+  amp_serial.send(queued.data, queued.len);
+  if (queued.post_action == AmpCommandPostAction::DeassertDtr) {
+    amp_dtr_set(false);
+  }
+}
 
 static void amp_dtr_set(bool asserted)
 {
@@ -624,10 +859,34 @@ static void print_serial_status()
   Serial.println(snapshot.invalid_checksums);
   Serial.print(F("  max_available="));
   Serial.println(snapshot.max_available);
+  Serial.print(F("  max_task_gap_ms="));
+  Serial.println(snapshot.max_task_gap_ms);
+  Serial.print(F("  max_rx_byte_gap_us="));
+  Serial.println(snapshot.max_rx_byte_gap_us);
+  Serial.print(F("  max_drain_burst="));
+  Serial.println(snapshot.max_drain_burst);
+  Serial.print(F("  max_queue_depth="));
+  Serial.println(snapshot.max_queue_depth);
+  Serial.print(F("  queued_packets_dropped="));
+  Serial.println(snapshot.queued_packets_dropped);
+  Serial.print(F("  max_command_queue_depth="));
+  Serial.println(snapshot.max_command_queue_depth);
+  Serial.print(F("  queued_commands_dropped="));
+  Serial.println(snapshot.queued_commands_dropped);
   Serial.print(F("  commands_sent="));
   Serial.println(snapshot.commands_sent);
   Serial.print(F("  last_checksum_error_ms="));
   Serial.println(snapshot.last_checksum_error_ms);
+  Serial.print(F("  checksum_sync_resyncs="));
+  Serial.println(snapshot.checksum_sync_resyncs);
+  Serial.print(F("  last_bad_available="));
+  Serial.println(snapshot.last_bad_available);
+  Serial.print(F("  last_bad_packet_len="));
+  Serial.println(snapshot.last_bad_packet_len);
+  Serial.print(F("  last_bad_checksum_expected=0x"));
+  Serial.println(snapshot.last_bad_checksum_expected, HEX);
+  Serial.print(F("  last_bad_checksum_received=0x"));
+  Serial.println(snapshot.last_bad_checksum_received, HEX);
 }
 
 static void print_amp_status()
@@ -792,6 +1051,12 @@ void app_status_print_json(Print &out)
   out.print(F(",\"current\":"));
   out.print(current_mode ? float(status.voltage) / 10.0f : float(status.current) / 10.0f, 1);
   out.print(F("}"));
+}
+
+uint32_t app_status_sequence(void)
+{
+  AmpStatusLock status_lock;
+  return published_status_sequence;
 }
 
 static void print_controller_status()
@@ -1244,6 +1509,7 @@ void setup() {
 
 #if SPE_BRINGUP_LEVEL >= 5
   serial_thread.start(serial_task);
+  console_thread.start(console_task);
 #endif
 
 #if SPE_ENABLE_WIFI_SETUP && SPE_BRINGUP_LEVEL >= 4
@@ -1275,38 +1541,54 @@ void ui_task()
     }
 #endif
 
+    process_next_queued_amp_packet();
     rtos::ThisThread::sleep_for(5ms);
   }
 }
 
 void serial_task()
 {
+  uint32_t last_run_ms = millis();
   while (true) {
+  const uint32_t now_ms = millis();
+  amp_serial_note_task_gap(now_ms - last_run_ms);
+  last_run_ms = now_ms;
+  uint32_t drained_bytes = 0;
+  bool completed_packet = false;
+
   // Check for serial data
   while (true) {
     ExpertPacketParser::Result read_result = ExpertPacketParser::Result::None;
     if (!amp_serial.read(read_result)) {
       break;
     }
+    ++drained_bytes;
 
     switch (read_result) {
       case ExpertPacketParser::Result::PacketReady:
         amp_serial_note_valid_packet();
-        process_packet(amp_serial.packet(), amp_serial.length());
+        completed_packet = true;
+        if (amp_serial.length() == 30) {
+          last_rcu = millis();
+          queue_amp_packet(amp_serial.packet(), amp_serial.length());
+        } else {
+          process_packet(amp_serial.packet(), amp_serial.length());
+        }
         break;
       case ExpertPacketParser::Result::InvalidChecksum:
       {
-        amp_serial_note_invalid_checksum();
-        DebugSerialLock debug_lock;
-        Serial.println("Invalid checksum");
+        amp_serial_note_invalid_checksum(
+          amp_serial.invalidLength(),
+          amp_serial.invalidExpectedChecksum(),
+          amp_serial.invalidReceivedChecksum(),
+          amp_serial.lastAvailable());
         break;
       }
       case ExpertPacketParser::Result::None:
         break;
     }
   }  
-
-  console_service();
+  amp_serial_note_drain_burst(drained_bytes);
 
 // Send Rcu_On command if nothing received for over ten seconds.
   unsigned long now = millis();
@@ -1316,6 +1598,7 @@ void serial_task()
     //delay(100);        //wait 100 millis
     //Serial1.begin(9600);
     send_command({Rcu_On});
+    completed_packet = true;
     last_rcu=now;
     if (progress < 100) {
       progress++;
@@ -1326,7 +1609,18 @@ void serial_task()
     }
   }
 
+    if (completed_packet) {
+      process_next_queued_amp_command();
+    }
     rtos::ThisThread::sleep_for(1ms);
+  }
+}
+
+void console_task()
+{
+  while (true) {
+    console_service();
+    rtos::ThisThread::sleep_for(10ms);
   }
 }
 
@@ -1368,6 +1662,7 @@ static void publish_amp_status_snapshot()
   published_last_status = last_status;
   published_web_cat_snapshot = web_cat_snapshot;
   published_web_cat_snapshot_until = web_cat_snapshot_until;
+  ++published_status_sequence;
 }
 
 void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
@@ -1799,7 +2094,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
 }
 
 
-void send_command(std::initializer_list<uint8_t> cmd) {
+bool send_command(std::initializer_list<uint8_t> cmd) {
   const bool rcu_on = cmd.size() == 1 && *cmd.begin() == Rcu_On;
   const bool off_key = cmd.size() == 2 && *cmd.begin() == Key_On && *(cmd.begin() + 1) == Off_Key;
 
@@ -1808,58 +2103,61 @@ void send_command(std::initializer_list<uint8_t> cmd) {
     amp_dtr_set(true);
   }
 
-  amp_serial.send(cmd);
-
   if (off_key) {
-    amp_serial.send({Rcu_Off});
+    if (!queue_amp_command(cmd)) {
+      return false;
+    }
+    if (!queue_amp_command({Rcu_Off}, AmpCommandPostAction::DeassertDtr)) {
+      return false;
+    }
     amp_remote_update_enabled = false;
-    amp_dtr_set(false);
+    return true;
   }
+
+  return queue_amp_command(cmd);
 }
 
 bool amp_control_press_key(const char *name)
 {
   if (strcmp(name, "l_down") == 0) {
-    send_command({Key_On, L_Minus_Key});
+    return send_command({Key_On, L_Minus_Key});
   } else if (strcmp(name, "l_up") == 0) {
-    send_command({Key_On, L_Plus_Key});
+    return send_command({Key_On, L_Plus_Key});
   } else if (strcmp(name, "c_down") == 0) {
-    send_command({Key_On, C_Minus_Key});
+    return send_command({Key_On, C_Minus_Key});
   } else if (strcmp(name, "c_up") == 0) {
-    send_command({Key_On, C_Plus_Key});
+    return send_command({Key_On, C_Plus_Key});
   } else if (strcmp(name, "tune") == 0) {
-    send_command({Key_On, Tune_Key});
+    return send_command({Key_On, Tune_Key});
   } else if (strcmp(name, "input") == 0) {
-    send_command({Key_On, In_Key});
+    return send_command({Key_On, In_Key});
   } else if (strcmp(name, "band_down") == 0) {
-    send_command({Key_On, Band_Minus_Key});
+    return send_command({Key_On, Band_Minus_Key});
   } else if (strcmp(name, "band_up") == 0) {
-    send_command({Key_On, Band_Plus_Key});
+    return send_command({Key_On, Band_Plus_Key});
   } else if (strcmp(name, "ant") == 0) {
-    send_command({Key_On, Ant_Key});
+    return send_command({Key_On, Ant_Key});
   } else if (strcmp(name, "left") == 0) {
-    send_command({Key_On, Left_Key});
+    return send_command({Key_On, Left_Key});
   } else if (strcmp(name, "right") == 0) {
-    send_command({Key_On, Right_Key});
+    return send_command({Key_On, Right_Key});
   } else if (strcmp(name, "cat") == 0) {
-    send_command({Key_On, Cat_Key});
+    return send_command({Key_On, Cat_Key});
   } else if (strcmp(name, "set") == 0) {
-    send_command({Key_On, Set_Key});
+    return send_command({Key_On, Set_Key});
   } else if (strcmp(name, "off") == 0) {
-    send_command({Key_On, Off_Key});
+    return send_command({Key_On, Off_Key});
   } else if (strcmp(name, "on") == 0) {
-    send_command({Rcu_On});
+    return send_command({Rcu_On});
   } else if (strcmp(name, "power") == 0) {
-    send_command({Key_On, Power_Key});
+    return send_command({Key_On, Power_Key});
   } else if (strcmp(name, "display") == 0) {
-    send_command({Key_On, Display_Key});
+    return send_command({Key_On, Display_Key});
   } else if (strcmp(name, "operate") == 0) {
-    send_command({Key_On, Operate_Key});
+    return send_command({Key_On, Operate_Key});
   } else {
     return false;
   }
-
-  return true;
 }
 
 /* Rather than have a separate function for every button, we check who the calling object it and act on it

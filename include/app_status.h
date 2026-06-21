@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <Arduino.h>
 #include <Print.h>
 
 /**
@@ -15,3 +16,8 @@
  * The caller owns the surrounding JSON context and stream lifetime.
  */
 void app_status_print_json(Print &out);
+
+/**
+ * Return the monotonically increasing sequence number for published amp status.
+ */
+uint32_t app_status_sequence(void);
