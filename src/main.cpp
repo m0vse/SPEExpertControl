@@ -503,16 +503,16 @@ static void ensure_transmit_scale_labels()
   }
 }
 
-static void configure_transmit_meters(const SpeStatusView &status)
+static void configure_transmit_meters(const AmpStatusSnapshot &status)
 {
   ensure_transmit_scale_labels();
-  lv_label_set_text(ui_powerLabel, status.power_label());
-  lv_label_set_text(ui_vPALabel, status.pa_label());
-  lv_bar_set_range(ui_powerBar, 0, status.power_bar_max());
-  lv_bar_set_range(ui_vBar, 0, status.pa_bar_max());
+  lv_label_set_text(ui_powerLabel, status.power_meter.label);
+  lv_label_set_text(ui_vPALabel, status.pa_meter.label);
+  lv_bar_set_range(ui_powerBar, 0, status.power_meter.max);
+  lv_bar_set_range(ui_vBar, 0, status.pa_meter.max);
   for (uint8_t i = 0; i < 5; ++i) {
-    lv_label_set_text(ui_powerScaleLabels[i], status.power_scale_label(i));
-    lv_label_set_text(ui_paScaleLabels[i], status.pa_scale_label(i));
+    lv_label_set_text(ui_powerScaleLabels[i], status.power_meter.scale[i]);
+    lv_label_set_text(ui_paScaleLabels[i], status.pa_meter.scale[i]);
   }
 }
 
@@ -1117,7 +1117,8 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
     // Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,UnusedA,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
     // Set_BaudRate,Manual_Tune,Backlight,UnusedB,UnusedC,Alarm_History,Shutdown
     ExpertScreen scr = static_cast<ExpertScreen>(packet_in.display_ctx);
-    SpeStatusView packet_status(packet_in);
+    SpeStatusView packet_status_view(packet_in);
+    AmpStatusSnapshot packet_status = spe_expert1k_make_status_snapshot(true, scr, packet_in);
     const unsigned long now = millis();
     const bool cat_hold_expired = screen == Cat_Screen && scr != Cat_Screen && now >= web_cat_snapshot_until;
 
@@ -1462,14 +1463,14 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
       }
 
       SpeStatusView previous_status(last_status);
-      if (previous_status.power_raw_tenths() != packet_status.power_raw_tenths()) {
-        lv_label_set_text_fmt(ui_pep, "%*.1f%s", 6, float(packet_status.power_raw_tenths()) / 10.0, packet_status.power_value_suffix());
-        lv_bar_set_value(ui_powerBar, packet_status.power_bar_value(), LV_ANIM_ON);
+      if (previous_status.power_raw_tenths() != packet_status_view.power_raw_tenths()) {
+        lv_label_set_text_fmt(ui_pep, "%*.1f%s", 6, packet_status.power_meter.value, packet_status.power_meter.suffix);
+        lv_bar_set_value(ui_powerBar, static_cast<int32_t>(packet_status.power_meter.value), LV_ANIM_ON);
       }
 
-      if (previous_status.pa_raw_tenths() != packet_status.pa_raw_tenths()) {
-        lv_label_set_text_fmt(ui_vPA, "%*.1f%s", 4, float(packet_status.pa_raw_tenths()) / 10.0, packet_status.pa_value_suffix());
-        lv_bar_set_value(ui_vBar, packet_status.pa_bar_value(), LV_ANIM_ON);
+      if (previous_status.pa_raw_tenths() != packet_status_view.pa_raw_tenths()) {
+        lv_label_set_text_fmt(ui_vPA, "%*.1f%s", 4, packet_status.pa_meter.value, packet_status.pa_meter.suffix);
+        lv_bar_set_value(ui_vBar, static_cast<int32_t>(packet_status.pa_meter.value), LV_ANIM_ON);
       }
 
       if (last_status.swr_gain != packet_in.swr_gain) {
