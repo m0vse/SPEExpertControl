@@ -278,10 +278,20 @@ static char console_line[96];
 static uint8_t console_line_len = 0;
 static bool console_poll_enabled = false;
 static bool console_last_was_line_end = false;
+struct AmpSerialStats {
+  uint32_t rx_bytes = 0;
+  uint32_t valid_packets = 0;
+  uint32_t invalid_checksums = 0;
+  uint32_t commands_sent = 0;
+  uint32_t max_available = 0;
+  uint32_t last_checksum_error_ms = 0;
+};
+static AmpSerialStats amp_serial_stats;
 static rtos::Mutex lvgl_mutex;
 static rtos::Mutex amp_serial_mutex;
 static rtos::Mutex debug_serial_mutex;
 static rtos::Mutex amp_status_mutex;
+static rtos::Mutex amp_serial_stats_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
 static rtos::Thread serial_thread(osPriorityAboveNormal, 8192, nullptr, "amp");
 static rtos::Thread wifi_thread(osPriorityNormal, 8192, nullptr, "wifi");
@@ -311,6 +321,45 @@ public:
   ~AmpStatusLock() { amp_status_mutex.unlock(); }
 };
 
+class AmpSerialStatsLock {
+public:
+  AmpSerialStatsLock() { amp_serial_stats_mutex.lock(); }
+  ~AmpSerialStatsLock() { amp_serial_stats_mutex.unlock(); }
+};
+
+static void amp_serial_note_available(uint32_t available)
+{
+  AmpSerialStatsLock lock;
+  if (available > amp_serial_stats.max_available) {
+    amp_serial_stats.max_available = available;
+  }
+}
+
+static void amp_serial_note_rx_byte()
+{
+  AmpSerialStatsLock lock;
+  ++amp_serial_stats.rx_bytes;
+}
+
+static void amp_serial_note_valid_packet()
+{
+  AmpSerialStatsLock lock;
+  ++amp_serial_stats.valid_packets;
+}
+
+static void amp_serial_note_invalid_checksum()
+{
+  AmpSerialStatsLock lock;
+  ++amp_serial_stats.invalid_checksums;
+  amp_serial_stats.last_checksum_error_ms = millis();
+}
+
+static void amp_serial_note_command()
+{
+  AmpSerialStatsLock lock;
+  ++amp_serial_stats.commands_sent;
+}
+
 class AmpSerialLink {
 public:
   void begin()
@@ -322,7 +371,9 @@ public:
   int available()
   {
     AmpSerialLock lock;
-    return Serial1.available();
+    const int available_bytes = Serial1.available();
+    amp_serial_note_available(available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes));
+    return available_bytes;
   }
 
   bool read(ExpertPacketParser::Result &result)
@@ -330,12 +381,15 @@ public:
     int value = -1;
     {
       AmpSerialLock lock;
-      if (Serial1.available() <= 0) {
+      const int available_bytes = Serial1.available();
+      amp_serial_note_available(available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes));
+      if (available_bytes <= 0) {
         return false;
       }
       value = Serial1.read();
     }
 
+    amp_serial_note_rx_byte();
     result = parser_.read(static_cast<uint8_t>(value));
     return true;
   }
@@ -346,6 +400,7 @@ public:
   void send(std::initializer_list<uint8_t> cmd)
   {
     AmpSerialLock lock;
+    amp_serial_note_command();
     Serial1.write(0x55); Serial1.write(0x55); Serial1.write(0x55);
     Serial1.write(cmd.size() & 0xff);
     uint8_t sum = 0;
@@ -465,6 +520,7 @@ static void print_console_help()
   Serial.println(F("  status      Controller summary"));
   Serial.println(F("  wifi        WiFi status, IP and firmware"));
   Serial.println(F("  web         HTTP server counters"));
+  Serial.println(F("  serial      Amplifier serial health counters"));
   Serial.println(F("  amp         Last amplifier status packet"));
   Serial.println(F("  scan        Blocking WiFi scan to serial"));
   Serial.println(F("  rcu         Send RCU_ON to the amplifier"));
@@ -548,6 +604,30 @@ static void print_web_status()
   DebugSerialLock debug_lock;
   Serial.println(F("Web server disabled at build time"));
 #endif
+}
+
+static void print_serial_status()
+{
+  AmpSerialStats snapshot;
+  {
+    AmpSerialStatsLock lock;
+    snapshot = amp_serial_stats;
+  }
+
+  DebugSerialLock debug_lock;
+  Serial.println(F("Amplifier serial stats:"));
+  Serial.print(F("  rx_bytes="));
+  Serial.println(snapshot.rx_bytes);
+  Serial.print(F("  valid_packets="));
+  Serial.println(snapshot.valid_packets);
+  Serial.print(F("  invalid_checksums="));
+  Serial.println(snapshot.invalid_checksums);
+  Serial.print(F("  max_available="));
+  Serial.println(snapshot.max_available);
+  Serial.print(F("  commands_sent="));
+  Serial.println(snapshot.commands_sent);
+  Serial.print(F("  last_checksum_error_ms="));
+  Serial.println(snapshot.last_checksum_error_ms);
 }
 
 static void print_amp_status()
@@ -878,6 +958,8 @@ static void handle_console_command(char *line)
     print_wifi_status();
   } else if (strcmp(line, "web") == 0) {
     print_web_status();
+  } else if (strcmp(line, "serial") == 0 || strcmp(line, "ser") == 0) {
+    print_serial_status();
   } else if (strcmp(line, "amp") == 0) {
     print_amp_status();
   } else if (strcmp(line, "scan") == 0) {
@@ -1209,10 +1291,12 @@ void serial_task()
 
     switch (read_result) {
       case ExpertPacketParser::Result::PacketReady:
+        amp_serial_note_valid_packet();
         process_packet(amp_serial.packet(), amp_serial.length());
         break;
       case ExpertPacketParser::Result::InvalidChecksum:
       {
+        amp_serial_note_invalid_checksum();
         DebugSerialLock debug_lock;
         Serial.println("Invalid checksum");
         break;
