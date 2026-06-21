@@ -19,6 +19,7 @@ static constexpr int kBufferRows = 48;
 
 static GigaDisplay_GFX gfx;
 static lv_color_t *draw_buffer = nullptr;
+static bool display_flipped = false;
 
 static uint32_t arduino_tick(void)
 {
@@ -33,8 +34,8 @@ static void flush_display(lv_display_t *display, const lv_area_t *area, uint8_t 
     if (framebuffer) {
         for (int32_t y = area->y1; y <= area->y2; ++y) {
             for (int32_t x = area->x1; x <= area->x2; ++x) {
-                const int32_t physical_x = kLogicalHeight - 1 - y;
-                const int32_t physical_y = x;
+                const int32_t physical_x = display_flipped ? y : kLogicalHeight - 1 - y;
+                const int32_t physical_y = display_flipped ? kLogicalWidth - 1 - x : x;
                 framebuffer[(physical_y * kPhysicalWidth) + physical_x] = *source++;
             }
         }
@@ -80,4 +81,17 @@ int giga_lvgl_display_begin(void)
 {
     static GigaLvglDisplay display;
     return display.begin();
+}
+
+void giga_lvgl_display_set_flipped(bool flipped)
+{
+    display_flipped = flipped;
+    if (lv_display_get_default()) {
+        lv_obj_invalidate(lv_screen_active());
+    }
+}
+
+bool giga_lvgl_display_is_flipped(void)
+{
+    return display_flipped;
 }

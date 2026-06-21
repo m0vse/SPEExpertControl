@@ -7,6 +7,8 @@
 
 #include "display/lvgl_giga_touch.h"
 
+#include "display/lvgl_giga_display.h"
+
 #include <lvgl.h>
 
 static constexpr int kLogicalWidth = 800;
@@ -30,9 +32,16 @@ static void transformed_touch_read(lv_indev_t *indev, lv_indev_data_t *data)
     const uint8_t contacts = touch ? touch->getTouchPoints(points) : 0;
 
     if (contacts > 0) {
+        const int16_t normal_x = clamp_coord(points[0].y, 0, kLogicalWidth - 1);
+        const int16_t normal_y = clamp_coord((kLogicalHeight - 1) - points[0].x, 0, kLogicalHeight - 1);
         data->state = LV_INDEV_STATE_PRESSED;
-        data->point.x = clamp_coord(points[0].y, 0, kLogicalWidth - 1);
-        data->point.y = clamp_coord((kLogicalHeight - 1) - points[0].x, 0, kLogicalHeight - 1);
+        if (giga_lvgl_display_is_flipped()) {
+            data->point.x = kLogicalWidth - 1 - normal_x;
+            data->point.y = kLogicalHeight - 1 - normal_y;
+        } else {
+            data->point.x = normal_x;
+            data->point.y = normal_y;
+        }
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }

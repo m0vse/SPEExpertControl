@@ -11,6 +11,7 @@
 
 #include "Arduino_GigaDisplayTouch.h"
 #include "amp_control.h"
+#include "app_config.h"
 #include "app_status.h"
 #include "display/lvgl_giga_display.h"
 #include "display/lvgl_giga_touch.h"
@@ -760,7 +761,7 @@ static void print_console_help()
   Serial.println(F("  scan        Blocking WiFi scan to serial"));
   Serial.println(F("  rcu         Send RCU_ON to the amplifier"));
   Serial.println(F("  dtr         Show amplifier DTR output state"));
-  Serial.println(F("  wifi-popup  Open WiFi popup on the display"));
+  Serial.println(F("  setup       Open controller setup popup on the display"));
   Serial.println(F("  wifi-saved  Show saved WiFi credential state"));
   Serial.println(F("  wifi-clear  Clear saved WiFi credentials"));
   Serial.println(F("  stats       CPU, heap and RTOS thread stats"));
@@ -1243,7 +1244,7 @@ static void handle_console_command(char *line)
     Serial.print(amp_dtr_asserted ? F("yes") : F("no"));
     Serial.print(F(" gpio_level="));
     Serial.println(digitalRead(SPE_AMP_DTR_PIN) == HIGH ? F("HIGH") : F("LOW"));
-  } else if (strcmp(line, "wifi-popup") == 0) {
+  } else if (strcmp(line, "setup") == 0 || strcmp(line, "wifi-popup") == 0) {
 #if SPE_ENABLE_WIFI_SETUP
     LvglLock lock;
     wifi_setup_set_visible(true);
@@ -1371,6 +1372,8 @@ void setup() {
 #endif
 
 #if SPE_BRINGUP_LEVEL >= 1
+  app_config_load();
+  giga_lvgl_display_set_flipped(app_config_display_flipped());
   boot_stage(1, F("display begin"));
   int display_status = giga_lvgl_display_begin();
   Serial.print(F("Boot: display status "));

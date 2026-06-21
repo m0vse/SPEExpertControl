@@ -7,11 +7,10 @@
 
 #include "ui/wifi_setup.h"
 
+#include "app_config.h"
+#include "display/lvgl_giga_display.h"
 #include "network/wifi_lock.h"
 #include <Arduino.h>
-#include <BlockDevice.h>
-#include <FATFileSystem.h>
-#include <MBRBlockDevice.h>
 #include <WiFi.h>
 #include <rtos.h>
 #include <stdio.h>
@@ -24,7 +23,6 @@ static const int MAX_WIFI_PASSWORD_LEN = 64;
 static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
 static const unsigned long WIFI_AUTOCONNECT_DELAY_MS = 2500;
 static const unsigned long WIFI_RECONNECT_RETRY_MS = 30000;
-static const char *WIFI_SETTINGS_PATH = "/fs/spe_wifi.cfg";
 
 static char wifi_ssids[MAX_WIFI_NETWORKS][MAX_WIFI_SSID_LEN + 1];
 static char wifi_dropdown_options[(MAX_WIFI_SSID_LEN + 16) * MAX_WIFI_NETWORKS];
@@ -59,6 +57,8 @@ static rtos::Mutex wifi_state_mutex;
 static lv_obj_t *wifi_panel = NULL;
 static lv_obj_t *wifi_dropdown = NULL;
 static lv_obj_t *wifi_password = NULL;
+static lv_obj_t *display_flip_button = NULL;
+static lv_obj_t *display_flip_label = NULL;
 static lv_obj_t *wifi_keyboard = NULL;
 static lv_obj_t *wifi_status_label = NULL;
 static lv_obj_t *wifi_hotspot = NULL;
@@ -67,11 +67,10 @@ static void wifi_connect_event_cb(lv_event_t *e);
 static void wifi_rescan_event_cb(lv_event_t *e);
 static void wifi_skip_event_cb(lv_event_t *e);
 static void wifi_password_event_cb(lv_event_t *e);
+static void display_flip_event_cb(lv_event_t *e);
 static void wifi_hotspot_event_cb(lv_event_t *e);
 static void connect_selected_wifi(void);
 static void wifi_keyboard_set_visible(bool visible);
-static bool wifi_storage_mount(mbed::BlockDevice *&root, mbed::MBRBlockDevice *&settings_partition, mbed::FATFileSystem *&settings_fs);
-static void wifi_storage_unmount(mbed::BlockDevice *root, mbed::FATFileSystem *settings_fs);
 static void wifi_settings_load(void);
 static void wifi_settings_save(const char *ssid, const char *password);
 static void wifi_connect_to(const char *ssid, const char *password, bool save_on_success);
@@ -105,7 +104,7 @@ void wifi_setup_create(void) {
     wifi_settings_load();
 
     wifi_panel = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(wifi_panel, 720, 220);
+    lv_obj_set_size(wifi_panel, 720, 260);
     lv_obj_center(wifi_panel);
     lv_obj_set_style_bg_color(wifi_panel, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(wifi_panel, 245, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -115,17 +114,25 @@ void wifi_setup_create(void) {
     lv_obj_add_flag(wifi_panel, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *title = lv_label_create(wifi_panel);
-    lv_label_set_text(title, "WiFi setup");
+    lv_label_set_text(title, "Controller setup");
     lv_obj_set_pos(title, 0, 0);
+
+    display_flip_button = lv_button_create(wifi_panel);
+    lv_obj_set_size(display_flip_button, 250, 42);
+    lv_obj_set_pos(display_flip_button, 0, 30);
+    lv_obj_add_event_cb(display_flip_button, display_flip_event_cb, LV_EVENT_CLICKED, NULL);
+    display_flip_label = lv_label_create(display_flip_button);
+    lv_label_set_text_fmt(display_flip_label, "Flip display: %s", app_config_display_flipped() ? "On" : "Off");
+    lv_obj_center(display_flip_label);
 
     wifi_dropdown = lv_dropdown_create(wifi_panel);
     lv_obj_set_size(wifi_dropdown, 430, 42);
-    lv_obj_set_pos(wifi_dropdown, 0, 38);
+    lv_obj_set_pos(wifi_dropdown, 0, 78);
     lv_dropdown_set_options(wifi_dropdown, "Not scanned");
 
     wifi_password = lv_textarea_create(wifi_panel);
     lv_obj_set_size(wifi_password, 250, 42);
-    lv_obj_set_pos(wifi_password, 445, 38);
+    lv_obj_set_pos(wifi_password, 445, 78);
     lv_textarea_set_one_line(wifi_password, true);
     lv_textarea_set_password_mode(wifi_password, true);
     lv_textarea_set_placeholder_text(wifi_password, "Password");
@@ -133,13 +140,13 @@ void wifi_setup_create(void) {
     lv_obj_add_event_cb(wifi_password, wifi_password_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(wifi_password, wifi_password_event_cb, LV_EVENT_CANCEL, NULL);
 
-    create_wifi_button(wifi_panel, "Connect", 0, 98, wifi_connect_event_cb);
-    create_wifi_button(wifi_panel, "Search", 170, 98, wifi_rescan_event_cb);
-    create_wifi_button(wifi_panel, "Close", 340, 98, wifi_skip_event_cb);
+    create_wifi_button(wifi_panel, "Connect", 0, 138, wifi_connect_event_cb);
+    create_wifi_button(wifi_panel, "Search", 170, 138, wifi_rescan_event_cb);
+    create_wifi_button(wifi_panel, "Close", 340, 138, wifi_skip_event_cb);
 
     wifi_status_label = lv_label_create(wifi_panel);
     lv_obj_set_width(wifi_status_label, 690);
-    lv_obj_set_pos(wifi_status_label, 0, 160);
+    lv_obj_set_pos(wifi_status_label, 0, 200);
     if (saved_credentials_valid) {
         lv_label_set_text_fmt(wifi_status_label, "Saved network: %s. Auto-connect will run shortly.", saved_ssid);
     } else {
@@ -476,16 +483,7 @@ bool wifi_setup_has_saved_credentials(void) {
 }
 
 void wifi_setup_clear_saved_credentials(void) {
-    mbed::BlockDevice *root = nullptr;
-    mbed::MBRBlockDevice *settings_partition = nullptr;
-    mbed::FATFileSystem *settings_fs = nullptr;
-
-    if (wifi_storage_mount(root, settings_partition, settings_fs)) {
-        remove(WIFI_SETTINGS_PATH);
-        wifi_storage_unmount(root, settings_fs);
-        delete settings_fs;
-        delete settings_partition;
-    }
+    app_config_clear_wifi_credentials();
 
     {
         WifiStateLock state_lock;
@@ -591,6 +589,18 @@ static void wifi_password_event_cb(lv_event_t *e) {
     }
 }
 
+static void display_flip_event_cb(lv_event_t *e) {
+    (void)e;
+    const bool flipped = !app_config_display_flipped();
+    giga_lvgl_display_set_flipped(flipped);
+    const bool saved = app_config_set_display_flipped(flipped);
+    if (display_flip_label) {
+        lv_label_set_text_fmt(display_flip_label, "Flip display: %s", flipped ? "On" : "Off");
+        lv_obj_center(display_flip_label);
+    }
+    lv_label_set_text(wifi_status_label, saved ? "Display orientation updated." : "Display orientation changed, but saving failed.");
+}
+
 static void wifi_hotspot_event_cb(lv_event_t *e) {
     (void)e;
     {
@@ -623,104 +633,23 @@ static void wifi_keyboard_set_visible(bool visible) {
     }
 }
 
-static bool wifi_storage_mount(mbed::BlockDevice *&root, mbed::MBRBlockDevice *&settings_partition, mbed::FATFileSystem *&settings_fs) {
-    root = mbed::BlockDevice::get_default_instance();
-    if (!root) {
-        Serial.println("WiFi settings: no default block device");
-        return false;
-    }
-
-    int err = root->init();
-    if (err) {
-        Serial.print("WiFi settings: QSPI init failed ");
-        Serial.println(err);
-        return false;
-    }
-
-    settings_partition = new mbed::MBRBlockDevice(root, 2);
-    settings_fs = new mbed::FATFileSystem("fs");
-
-    err = settings_fs->mount(settings_partition);
-    if (err) {
-        Serial.println("WiFi settings: creating QSPI partition 2");
-        mbed::MBRBlockDevice::partition(root, 2, 0x0B, 1 * 1024 * 1024, 6 * 1024 * 1024);
-        err = settings_fs->reformat(settings_partition);
-    }
-
-    if (err) {
-        Serial.print("WiFi settings: filesystem mount failed ");
-        Serial.println(err);
-        delete settings_fs;
-        delete settings_partition;
-        settings_fs = nullptr;
-        settings_partition = nullptr;
-        root->deinit();
-        return false;
-    }
-
-    return true;
-}
-
-static void wifi_storage_unmount(mbed::BlockDevice *root, mbed::FATFileSystem *settings_fs) {
-    if (settings_fs) {
-        settings_fs->unmount();
-    }
-    if (root) {
-        root->deinit();
-    }
-}
-
 static void wifi_settings_load(void) {
-    char loaded_ssid[MAX_WIFI_SSID_LEN + 1];
-    char loaded_password[MAX_WIFI_PASSWORD_LEN + 1];
-    loaded_ssid[0] = '\0';
-    loaded_password[0] = '\0';
+    app_config_load();
+    AppConfig loaded = app_config_snapshot();
 
-    mbed::BlockDevice *root = nullptr;
-    mbed::MBRBlockDevice *settings_partition = nullptr;
-    mbed::FATFileSystem *settings_fs = nullptr;
-
-    if (!wifi_storage_mount(root, settings_partition, settings_fs)) {
-        return;
-    }
-
-    FILE *fp = fopen(WIFI_SETTINGS_PATH, "r");
-    if (fp) {
-        char line[128];
-        while (fgets(line, sizeof(line), fp)) {
-            char *newline = strchr(line, '\n');
-            if (newline) *newline = '\0';
-            char *cr = strchr(line, '\r');
-            if (cr) *cr = '\0';
-
-            if (strncmp(line, "ssid=", 5) == 0) {
-                strncpy(loaded_ssid, line + 5, sizeof(loaded_ssid) - 1);
-                loaded_ssid[sizeof(loaded_ssid) - 1] = '\0';
-            } else if (strncmp(line, "password=", 9) == 0) {
-                strncpy(loaded_password, line + 9, sizeof(loaded_password) - 1);
-                loaded_password[sizeof(loaded_password) - 1] = '\0';
-            }
-        }
-        fclose(fp);
-    }
-
-    wifi_storage_unmount(root, settings_fs);
-    delete settings_fs;
-    delete settings_partition;
-
-    const bool loaded_valid = loaded_ssid[0] != '\0';
+    const bool loaded_valid = loaded.wifi_ssid[0] != '\0';
     {
         WifiStateLock state_lock;
-        strncpy(saved_ssid, loaded_ssid, sizeof(saved_ssid) - 1);
+        strncpy(saved_ssid, loaded.wifi_ssid, sizeof(saved_ssid) - 1);
         saved_ssid[sizeof(saved_ssid) - 1] = '\0';
-        strncpy(saved_password, loaded_password, sizeof(saved_password) - 1);
+        strncpy(saved_password, loaded.wifi_password, sizeof(saved_password) - 1);
         saved_password[sizeof(saved_password) - 1] = '\0';
         saved_credentials_loaded = true;
         saved_credentials_valid = loaded_valid;
     }
     if (loaded_valid) {
         Serial.print("Loaded saved WiFi SSID: ");
-        Serial.println(loaded_ssid);
+        Serial.println(loaded.wifi_ssid);
     } else {
         Serial.println("No saved WiFi credentials");
     }
@@ -731,21 +660,7 @@ static void wifi_settings_save(const char *ssid, const char *password) {
         return;
     }
 
-    mbed::BlockDevice *root = nullptr;
-    mbed::MBRBlockDevice *settings_partition = nullptr;
-    mbed::FATFileSystem *settings_fs = nullptr;
-
-    if (!wifi_storage_mount(root, settings_partition, settings_fs)) {
-        return;
-    }
-
-    FILE *fp = fopen(WIFI_SETTINGS_PATH, "w");
-    if (!fp) {
-        Serial.println("WiFi settings: failed to open settings file for write");
-    } else {
-        fprintf(fp, "ssid=%s\n", ssid);
-        fprintf(fp, "password=%s\n", password ? password : "");
-        fclose(fp);
+    if (app_config_set_wifi_credentials(ssid, password)) {
         {
             WifiStateLock state_lock;
             strncpy(saved_ssid, ssid, sizeof(saved_ssid) - 1);
@@ -757,11 +672,9 @@ static void wifi_settings_save(const char *ssid, const char *password) {
         }
         Serial.print("Saved WiFi credentials for SSID: ");
         Serial.println(ssid);
+    } else {
+        Serial.println("WiFi settings: failed to save settings");
     }
-
-    wifi_storage_unmount(root, settings_fs);
-    delete settings_fs;
-    delete settings_partition;
 }
 
 static void wifi_connect_to(const char *ssid, const char *password, bool save_on_success) {
