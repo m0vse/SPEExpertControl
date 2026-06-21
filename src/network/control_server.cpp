@@ -10,6 +10,7 @@
 #include "amp_control.h"
 #include "app_status.h"
 #include "network/spe_logo_svg.h"
+#include "network/wifi_lock.h"
 #include <Arduino.h>
 #include <WiFi.h>
 
@@ -185,5 +186,6 @@ static ControlServer control_server;
 
 void control_server_service(void)
 {
+    WifiStackLock lock;
     control_server.service();
 }

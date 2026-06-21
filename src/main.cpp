@@ -6,6 +6,7 @@
  */
 
 #include <Arduino.h>
+#include <platform/mbed_stats.h>
 #include <rtos.h>
 
 #include "Arduino_GigaDisplayTouch.h"
@@ -61,6 +62,8 @@ void send_command(std::initializer_list<uint8_t> cmd);
 void button_pressed(lv_event_t * e);
 void ui_task(void);
 void serial_task(void);
+void wifi_task(void);
+void web_task(void);
 
 const char* outs[] = {"HALF", "FULL"};
 
@@ -271,6 +274,8 @@ static rtos::Mutex amp_serial_mutex;
 static rtos::Mutex debug_serial_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
 static rtos::Thread serial_thread(osPriorityNormal, 8192, nullptr, "amp");
+static rtos::Thread wifi_thread(osPriorityNormal, 8192, nullptr, "wifi");
+static rtos::Thread web_thread(osPriorityBelowNormal, 8192, nullptr, "web");
 
 class LvglLock {
 public:
@@ -450,6 +455,8 @@ static void print_console_help()
   Serial.println(F("  wifi-popup  Open WiFi popup on the display"));
   Serial.println(F("  wifi-saved  Show saved WiFi credential state"));
   Serial.println(F("  wifi-clear  Clear saved WiFi credentials"));
+  Serial.println(F("  stats       CPU, heap and RTOS thread stats"));
+  Serial.println(F("  reboot      Reboot the controller"));
   Serial.println(F("  poll on     Enable periodic status polling"));
   Serial.println(F("  poll off    Disable periodic status polling"));
 }
@@ -682,6 +689,78 @@ static void print_wifi_scan()
 #endif
 }
 
+static void print_runtime_stats()
+{
+  mbed_stats_heap_t heap;
+  mbed_stats_stack_t stack;
+  mbed_stats_cpu_t cpu;
+  mbed_stats_thread_t threads[12];
+
+  mbed_stats_heap_get(&heap);
+  mbed_stats_stack_get(&stack);
+  mbed_stats_cpu_get(&cpu);
+  const size_t thread_count = mbed_stats_thread_get_each(threads, COUNT_OF(threads));
+
+  DebugSerialLock debug_lock;
+  Serial.println(F("Runtime stats:"));
+  Serial.print(F("  uptime_ms="));
+  Serial.println(static_cast<unsigned long>(cpu.uptime / 1000ULL));
+  Serial.print(F("  idle_ms="));
+  Serial.println(static_cast<unsigned long>(cpu.idle_time / 1000ULL));
+  Serial.print(F("  sleep_ms="));
+  Serial.println(static_cast<unsigned long>(cpu.sleep_time / 1000ULL));
+  Serial.print(F("  deep_sleep_ms="));
+  Serial.println(static_cast<unsigned long>(cpu.deep_sleep_time / 1000ULL));
+
+  Serial.print(F("  heap_current="));
+  Serial.print(heap.current_size);
+  Serial.print(F(" max="));
+  Serial.print(heap.max_size);
+  Serial.print(F(" reserved="));
+  Serial.print(heap.reserved_size);
+  Serial.print(F(" allocs="));
+  Serial.print(heap.alloc_cnt);
+  Serial.print(F(" fails="));
+  Serial.println(heap.alloc_fail_cnt);
+
+  Serial.print(F("  stack_total_used_max="));
+  Serial.print(stack.max_size);
+  Serial.print(F(" reserved="));
+  Serial.print(stack.reserved_size);
+  Serial.print(F(" count="));
+  Serial.println(stack.stack_cnt);
+
+  Serial.println(F("  threads:"));
+  for (size_t i = 0; i < thread_count; ++i) {
+    Serial.print(F("    id=0x"));
+    Serial.print(threads[i].id, HEX);
+    Serial.print(F(" name="));
+    Serial.print(threads[i].name ? threads[i].name : "(null)");
+    Serial.print(F(" state="));
+    Serial.print(threads[i].state);
+    Serial.print(F(" prio="));
+    Serial.print(threads[i].priority);
+    Serial.print(F(" stack="));
+    Serial.print(threads[i].stack_size);
+    Serial.print(F(" free="));
+    Serial.println(threads[i].stack_space);
+  }
+  if (thread_count == COUNT_OF(threads)) {
+    Serial.println(F("  thread list may be truncated"));
+  }
+}
+
+static void reboot_controller()
+{
+  {
+    DebugSerialLock debug_lock;
+    Serial.println(F("Rebooting controller..."));
+    Serial.flush();
+  }
+  delay(100);
+  NVIC_SystemReset();
+}
+
 static void handle_console_command(char *line)
 {
   while (*line == ' ' || *line == '\t') {
@@ -707,6 +786,10 @@ static void handle_console_command(char *line)
     print_amp_status();
   } else if (strcmp(line, "scan") == 0) {
     print_wifi_scan();
+  } else if (strcmp(line, "stats") == 0 || strcmp(line, "mem") == 0) {
+    print_runtime_stats();
+  } else if (strcmp(line, "reboot") == 0 || strcmp(line, "reset") == 0) {
+    reboot_controller();
   } else if (strcmp(line, "rcu") == 0) {
     send_command({Rcu_On});
   } else if (strcmp(line, "dtr") == 0) {
@@ -985,6 +1068,14 @@ void setup() {
   serial_thread.start(serial_task);
 #endif
 
+#if SPE_ENABLE_WIFI_SETUP && SPE_BRINGUP_LEVEL >= 4
+  wifi_thread.start(wifi_task);
+#endif
+
+#if SPE_ENABLE_WEB_SERVER && SPE_BRINGUP_LEVEL >= 5
+  web_thread.start(web_task);
+#endif
+
 }
 
 void loop()
@@ -1013,16 +1104,6 @@ void ui_task()
 void serial_task()
 {
   while (true) {
-#if SPE_ENABLE_WEB_SERVER && SPE_BRINGUP_LEVEL >= 5
-    #if SPE_ENABLE_WIFI_SETUP
-    if (wifi_setup_is_connected()) {
-      control_server_service();
-    }
-    #else
-    control_server_service();
-    #endif
-#endif
-
   // Check for serial data
   while (true) {
     ExpertPacketParser::Result read_result = ExpertPacketParser::Result::None;
@@ -1065,6 +1146,36 @@ void serial_task()
     }
   }
 
+    rtos::ThisThread::sleep_for(5ms);
+  }
+}
+
+void wifi_task()
+{
+  rtos::ThisThread::sleep_for(2s);
+  while (true) {
+#if SPE_ENABLE_WIFI_SETUP && SPE_BRINGUP_LEVEL >= 4
+    wifi_setup_connection_service();
+#endif
+    rtos::ThisThread::sleep_for(100ms);
+  }
+}
+
+void web_task()
+{
+  rtos::ThisThread::sleep_for(3s);
+  while (true) {
+#if SPE_ENABLE_WEB_SERVER && SPE_BRINGUP_LEVEL >= 5
+    #if SPE_ENABLE_WIFI_SETUP
+    if (wifi_setup_is_connected()) {
+      control_server_service();
+    } else {
+      rtos::ThisThread::sleep_for(250ms);
+    }
+    #else
+    control_server_service();
+    #endif
+#endif
     rtos::ThisThread::sleep_for(5ms);
   }
 }

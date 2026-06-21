@@ -7,6 +7,7 @@
 
 #include "ui/wifi_setup.h"
 
+#include "network/wifi_lock.h"
 #include <Arduino.h>
 #include <BlockDevice.h>
 #include <FATFileSystem.h>
@@ -39,8 +40,13 @@ static bool wifi_stack_available = true;
 static bool saved_credentials_loaded = false;
 static bool saved_credentials_valid = false;
 static bool pending_save_on_success = false;
+static bool wifi_ui_dirty = false;
+static bool wifi_begin_pending = false;
+static bool wifi_hide_requested = false;
 static unsigned long wifi_connect_started = 0;
 static unsigned long wifi_next_reconnect = WIFI_AUTOCONNECT_DELAY_MS;
+static char wifi_status_text[96];
+static char wifi_startup_text[96];
 static lv_obj_t *wifi_panel = NULL;
 static lv_obj_t *wifi_dropdown = NULL;
 static lv_obj_t *wifi_password = NULL;
@@ -61,6 +67,8 @@ static void wifi_settings_load(void);
 static void wifi_settings_save(const char *ssid, const char *password);
 static void wifi_connect_to(const char *ssid, const char *password, bool save_on_success);
 static void wifi_connect_saved(void);
+static void wifi_set_status_text(const char *status_text, const char *startup_text);
+static void wifi_apply_ui_updates(void);
 
 static lv_obj_t *create_wifi_button(lv_obj_t *parent, const char *text, int x, int y, lv_event_cb_t cb) {
     lv_obj_t *button = lv_button_create(parent);
@@ -140,6 +148,8 @@ void wifi_setup_scan_networks(void) {
     wifi_network_count = 0;
     wifi_dropdown_options[0] = '\0';
 
+    WifiStackLock lock;
+
     if (WiFi.status() == WL_NO_MODULE) {
         Serial.println("Communication with WiFi module failed!");
         wifi_stack_available = false;
@@ -192,10 +202,66 @@ void wifi_setup_scan_networks(void) {
 }
 
 void wifi_setup_service(void) {
+    wifi_apply_ui_updates();
+    if (wifi_hide_requested) {
+        wifi_hide_requested = false;
+        wifi_setup_set_visible(false);
+    }
+    if (wifi_connecting) {
+        const unsigned long elapsed = millis() - wifi_connect_started;
+        const int value = 10 + static_cast<int>((elapsed % 3000UL) / 30UL);
+        lv_bar_set_value(ui_startupBar, value > 100 ? 100 : value, LV_ANIM_OFF);
+    }
+}
+
+void wifi_setup_connection_service(void) {
     if (!wifi_stack_available || wifi_skipped) return;
 
     const unsigned long now = millis();
+    WifiStackLock lock;
     const int status = WiFi.status();
+
+    if (wifi_begin_pending) {
+        wifi_begin_pending = false;
+        Serial.print("WiFi connecting to ");
+        Serial.println(pending_ssid);
+
+        WiFi.setTimeout(WIFI_CONNECT_TIMEOUT_MS);
+        const int result = pending_password[0] ? WiFi.begin(pending_ssid, pending_password) : WiFi.begin(pending_ssid);
+        Serial.print("WiFi begin result: ");
+        Serial.println(result);
+
+        if (result == WL_CONNECTED) {
+            wifi_connecting = false;
+            wifi_connected = true;
+            wifi_setup_active = false;
+            String ip = WiFi.localIP().toString();
+            if (pending_save_on_success) {
+                wifi_settings_save(pending_ssid, pending_password);
+            }
+            pending_save_on_success = false;
+            char status_text[96];
+            char startup_text[96];
+            snprintf(status_text, sizeof(status_text), "Connected: %s", pending_ssid);
+            snprintf(startup_text, sizeof(startup_text), "WiFi connected: %s", ip.c_str());
+            wifi_set_status_text(status_text, startup_text);
+            wifi_hide_requested = true;
+            return;
+        }
+
+        if (result == WL_NO_MODULE) {
+            wifi_stack_available = false;
+            wifi_connecting = false;
+            wifi_connected = false;
+            pending_save_on_success = false;
+            wifi_set_status_text("WiFi firmware unavailable.", "WiFi unavailable");
+            return;
+        }
+
+        char status_text[96];
+        snprintf(status_text, sizeof(status_text), "Connecting to %s... status %d", pending_ssid, result);
+        wifi_set_status_text(status_text, nullptr);
+    }
 
     if (status == WL_CONNECTED) {
         if (!wifi_connected) {
@@ -208,11 +274,12 @@ void wifi_setup_service(void) {
                 wifi_settings_save(pending_ssid, pending_password);
                 pending_save_on_success = false;
             }
-            if (wifi_status_label) {
-                lv_label_set_text_fmt(wifi_status_label, "Connected: %s", connected_ssid.c_str());
-            }
-            lv_label_set_text_fmt(ui_startupMessage, "WiFi connected: %s", ip.c_str());
-            wifi_setup_set_visible(false);
+            char status_text[96];
+            char startup_text[96];
+            snprintf(status_text, sizeof(status_text), "Connected: %s", connected_ssid.c_str());
+            snprintf(startup_text, sizeof(startup_text), "WiFi connected: %s", ip.c_str());
+            wifi_set_status_text(status_text, startup_text);
+            wifi_hide_requested = true;
         }
         return;
     }
@@ -231,10 +298,7 @@ void wifi_setup_service(void) {
             wifi_connected = false;
             WiFi.disconnect();
             wifi_next_reconnect = now + WIFI_RECONNECT_RETRY_MS;
-            if (wifi_status_label) {
-                lv_label_set_text(wifi_status_label, "Connection failed. Retrying in background.");
-            }
-            lv_label_set_text(ui_startupMessage, "WiFi retry pending");
+            wifi_set_status_text("Connection failed. Retrying in background.", "WiFi retry pending");
         }
         return;
     }
@@ -508,7 +572,7 @@ static void wifi_settings_save(const char *ssid, const char *password) {
 
 static void wifi_connect_to(const char *ssid, const char *password, bool save_on_success) {
     if (!ssid || ssid[0] == '\0') {
-        lv_label_set_text(wifi_status_label, "No SSID selected.");
+        wifi_set_status_text("No SSID selected.", nullptr);
         return;
     }
 
@@ -517,48 +581,17 @@ static void wifi_connect_to(const char *ssid, const char *password, bool save_on
     strncpy(pending_password, password ? password : "", sizeof(pending_password) - 1);
     pending_password[sizeof(pending_password) - 1] = '\0';
     pending_save_on_success = save_on_success;
-
-    lv_label_set_text_fmt(wifi_status_label, "Connecting to %s...", pending_ssid);
-    lv_label_set_text_fmt(ui_startupMessage, "Connecting to %s", pending_ssid);
-    lv_timer_handler();
-
-    Serial.print("WiFi connecting to ");
-    Serial.println(pending_ssid);
-
-    WiFi.setTimeout(WIFI_CONNECT_TIMEOUT_MS);
-    int result = pending_password[0] ? WiFi.begin(pending_ssid, pending_password) : WiFi.begin(pending_ssid);
-    Serial.print("WiFi begin result: ");
-    Serial.println(result);
-
-    if (result == WL_CONNECTED) {
-        wifi_connecting = false;
-        wifi_connected = true;
-        wifi_setup_active = false;
-        String ip = WiFi.localIP().toString();
-        if (save_on_success) {
-            wifi_settings_save(pending_ssid, pending_password);
-        }
-        pending_save_on_success = false;
-        lv_label_set_text_fmt(wifi_status_label, "Connected: %s", pending_ssid);
-        lv_label_set_text_fmt(ui_startupMessage, "WiFi connected: %s", ip.c_str());
-        wifi_setup_set_visible(false);
-        return;
-    }
-
-    if (result == WL_NO_MODULE) {
-        wifi_stack_available = false;
-        wifi_connecting = false;
-        wifi_connected = false;
-        pending_save_on_success = false;
-        lv_label_set_text(wifi_status_label, "WiFi firmware unavailable.");
-        lv_label_set_text(ui_startupMessage, "WiFi unavailable");
-        return;
-    }
-
     wifi_connecting = true;
+    wifi_begin_pending = true;
     wifi_connect_started = millis();
     wifi_next_reconnect = wifi_connect_started + WIFI_CONNECT_TIMEOUT_MS + WIFI_RECONNECT_RETRY_MS;
-    lv_label_set_text_fmt(wifi_status_label, "Connecting to %s... status %d", pending_ssid, result);
+
+    char status_text[96];
+    char startup_text[96];
+    snprintf(status_text, sizeof(status_text), "Connecting to %s...", pending_ssid);
+    snprintf(startup_text, sizeof(startup_text), "Connecting to %s", pending_ssid);
+    wifi_set_status_text(status_text, startup_text);
+
 }
 
 static void wifi_connect_saved(void) {
@@ -568,4 +601,29 @@ static void wifi_connect_saved(void) {
     Serial.print("Auto-connecting saved WiFi SSID: ");
     Serial.println(saved_ssid);
     wifi_connect_to(saved_ssid, saved_password, false);
+}
+
+static void wifi_set_status_text(const char *status_text, const char *startup_text) {
+    if (status_text) {
+        strncpy(wifi_status_text, status_text, sizeof(wifi_status_text) - 1);
+        wifi_status_text[sizeof(wifi_status_text) - 1] = '\0';
+    }
+    if (startup_text) {
+        strncpy(wifi_startup_text, startup_text, sizeof(wifi_startup_text) - 1);
+        wifi_startup_text[sizeof(wifi_startup_text) - 1] = '\0';
+    }
+    wifi_ui_dirty = true;
+}
+
+static void wifi_apply_ui_updates(void) {
+    if (!wifi_ui_dirty) {
+        return;
+    }
+    if (wifi_status_label && wifi_status_text[0]) {
+        lv_label_set_text(wifi_status_label, wifi_status_text);
+    }
+    if (wifi_startup_text[0]) {
+        lv_label_set_text(ui_startupMessage, wifi_startup_text);
+    }
+    wifi_ui_dirty = false;
 }

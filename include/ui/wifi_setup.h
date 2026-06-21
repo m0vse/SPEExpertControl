@@ -18,9 +18,17 @@ void wifi_setup_create(void);
 void wifi_setup_scan_networks(void);
 
 /**
- * Advance WiFi connection state, including saved-credential background reconnect.
+ * Apply pending WiFi UI updates and animate visible connection progress.
  */
 void wifi_setup_service(void);
+
+/**
+ * Advance WiFi connection state, including saved-credential background reconnect.
+ *
+ * This can block inside the WiFi stack and must not be called while holding the
+ * LVGL mutex.
+ */
+void wifi_setup_connection_service(void);
 
 /**
  * Show or hide the WiFi setup popup.
