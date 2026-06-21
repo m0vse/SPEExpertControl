@@ -383,6 +383,8 @@ void ui_mainScreen_screen_init(void)
 
     ui_Image5 = lv_image_create(ui_receive);
     lv_image_set_src(ui_Image5, &ui_img_spe_png);
+    lv_obj_set_style_image_recolor(ui_Image5, lv_color_hex(0x050505), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_image_recolor_opa(ui_Image5, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_width(ui_Image5, LV_SIZE_CONTENT);   /// 380
     lv_obj_set_height(ui_Image5, LV_SIZE_CONTENT);    /// 137
     lv_obj_set_x(ui_Image5, -189);

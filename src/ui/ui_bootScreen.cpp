@@ -26,6 +26,8 @@ void ui_bootScreen_screen_init(void)
 
     ui_Image1 = lv_image_create(ui_bootScreen);
     lv_image_set_src(ui_Image1, &ui_img_spe_png);
+    lv_obj_set_style_image_recolor(ui_Image1, lv_color_hex(0x050505), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_image_recolor_opa(ui_Image1, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_width(ui_Image1, LV_SIZE_CONTENT);   /// 1
     lv_obj_set_height(ui_Image1, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(ui_Image1, 0);
