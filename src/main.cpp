@@ -21,8 +21,8 @@
 #include "amp_dtr.h"
 #include "models/spe_expert1k/expertpackets.h"
 #include "models/spe_expert1k/menuitems.h"
-#include "models/spe_expert1k/packet_parser.h"
 #include "models/spe_expert1k/protocol.h"
+#include "models/spe_expert1k/serial_link.h"
 #include "models/spe_expert1k/status_view.h"
 #include "serial/transport_stats.h"
 #include "ui/menu_control.h"
@@ -182,30 +182,8 @@ static bool amp_remote_update_enabled = true;
 static Expert_Packet web_cat_snapshot{};
 static unsigned long web_cat_snapshot_until = 0;
 int transformed_touch_devices = 0;
-static const uint8_t AMP_PACKET_QUEUE_SIZE = 8;
-static const uint8_t AMP_COMMAND_QUEUE_SIZE = 16;
-static const uint8_t AMP_COMMAND_MAX_LEN = 4;
-struct QueuedAmpPacket {
-  Expert_Packet packet;
-  uint8_t len = 0;
-};
-struct QueuedAmpCommand {
-  uint8_t data[AMP_COMMAND_MAX_LEN]{};
-  uint8_t len = 0;
-};
-static QueuedAmpPacket amp_packet_queue[AMP_PACKET_QUEUE_SIZE];
-static uint8_t amp_packet_queue_head = 0;
-static uint8_t amp_packet_queue_tail = 0;
-static uint8_t amp_packet_queue_count = 0;
-static QueuedAmpCommand amp_command_queue[AMP_COMMAND_QUEUE_SIZE];
-static uint8_t amp_command_queue_head = 0;
-static uint8_t amp_command_queue_tail = 0;
-static uint8_t amp_command_queue_count = 0;
 static rtos::Mutex lvgl_mutex;
-static rtos::Mutex amp_serial_mutex;
 static rtos::Mutex debug_serial_mutex;
-static rtos::Mutex amp_packet_queue_mutex;
-static rtos::Mutex amp_command_queue_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
 static rtos::Thread serial_thread(osPriorityHigh, 8192, nullptr, "amp");
 static rtos::Thread console_thread(osPriorityBelowNormal, 4096, nullptr, "console");
@@ -218,196 +196,18 @@ public:
   ~LvglLock() { lvgl_mutex.unlock(); }
 };
 
-class AmpSerialLock {
-public:
-  AmpSerialLock() { amp_serial_mutex.lock(); }
-  ~AmpSerialLock() { amp_serial_mutex.unlock(); }
-};
-
 class DebugSerialLock {
 public:
   DebugSerialLock() { debug_serial_mutex.lock(); }
   ~DebugSerialLock() { debug_serial_mutex.unlock(); }
 };
 
-class AmpPacketQueueLock {
-public:
-  AmpPacketQueueLock() { amp_packet_queue_mutex.lock(); }
-  ~AmpPacketQueueLock() { amp_packet_queue_mutex.unlock(); }
-};
-
-class AmpCommandQueueLock {
-public:
-  AmpCommandQueueLock() { amp_command_queue_mutex.lock(); }
-  ~AmpCommandQueueLock() { amp_command_queue_mutex.unlock(); }
-};
-
-static void queue_amp_packet(const Expert_Packet &packet, uint8_t len)
-{
-  uint8_t depth = 0;
-  {
-    AmpPacketQueueLock lock;
-    if (amp_packet_queue_count >= AMP_PACKET_QUEUE_SIZE) {
-      amp_packet_queue_tail = (amp_packet_queue_tail + 1) % AMP_PACKET_QUEUE_SIZE;
-      --amp_packet_queue_count;
-      serial_transport_note_packet_drop();
-    }
-
-    amp_packet_queue[amp_packet_queue_head].packet = packet;
-    amp_packet_queue[amp_packet_queue_head].len = len;
-    amp_packet_queue_head = (amp_packet_queue_head + 1) % AMP_PACKET_QUEUE_SIZE;
-    ++amp_packet_queue_count;
-    depth = amp_packet_queue_count;
-  }
-  serial_transport_note_queue_depth(depth);
-}
-
-static bool queue_amp_command(std::initializer_list<uint8_t> cmd)
-{
-  if (cmd.size() == 0 || cmd.size() > AMP_COMMAND_MAX_LEN) {
-    return false;
-  }
-
-  uint8_t depth = 0;
-  {
-    AmpCommandQueueLock lock;
-    if (amp_command_queue_count >= AMP_COMMAND_QUEUE_SIZE) {
-      serial_transport_note_command_drop();
-      return false;
-    }
-
-    QueuedAmpCommand &queued = amp_command_queue[amp_command_queue_head];
-    queued.len = static_cast<uint8_t>(cmd.size());
-    uint8_t i = 0;
-    for (uint8_t c : cmd) {
-      queued.data[i++] = c;
-    }
-
-    amp_command_queue_head = (amp_command_queue_head + 1) % AMP_COMMAND_QUEUE_SIZE;
-    ++amp_command_queue_count;
-    depth = amp_command_queue_count;
-  }
-  serial_transport_note_command_queue_depth(depth);
-  return true;
-}
-
-static bool dequeue_amp_packet(QueuedAmpPacket &queued)
-{
-  AmpPacketQueueLock lock;
-  if (amp_packet_queue_count == 0) {
-    return false;
-  }
-
-  queued = amp_packet_queue[amp_packet_queue_tail];
-  amp_packet_queue_tail = (amp_packet_queue_tail + 1) % AMP_PACKET_QUEUE_SIZE;
-  --amp_packet_queue_count;
-  return true;
-}
-
-static bool dequeue_amp_command(QueuedAmpCommand &queued)
-{
-  AmpCommandQueueLock lock;
-  if (amp_command_queue_count == 0) {
-    return false;
-  }
-
-  queued = amp_command_queue[amp_command_queue_tail];
-  amp_command_queue_tail = (amp_command_queue_tail + 1) % AMP_COMMAND_QUEUE_SIZE;
-  --amp_command_queue_count;
-  return true;
-}
-
 static void process_next_queued_amp_packet()
 {
-  QueuedAmpPacket queued;
-  if (dequeue_amp_packet(queued)) {
+  SpeExpert1kQueuedPacket queued;
+  if (spe_expert1k_dequeue_packet(queued)) {
     process_packet(queued.packet, queued.len);
   }
-}
-
-class AmpSerialLink {
-public:
-  void begin()
-  {
-    AmpSerialLock lock;
-    Serial1.begin(9600);
-  }
-
-  int available()
-  {
-    AmpSerialLock lock;
-    const int available_bytes = Serial1.available();
-    last_available_ = available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes);
-    serial_transport_note_available(last_available_);
-    return available_bytes;
-  }
-
-  bool read(ExpertPacketParser::Result &result)
-  {
-    int value = -1;
-    {
-      AmpSerialLock lock;
-      const int available_bytes = Serial1.available();
-      last_available_ = available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes);
-      serial_transport_note_available(last_available_);
-      if (available_bytes <= 0) {
-        return false;
-      }
-      value = Serial1.read();
-    }
-
-    serial_transport_note_rx_byte(micros());
-    result = parser_.read(static_cast<uint8_t>(value));
-    return true;
-  }
-
-  const Expert_Packet &packet() const { return parser_.packet(); }
-  uint8_t length() const { return parser_.length(); }
-  uint8_t invalidLength() const { return parser_.invalidLength(); }
-  uint8_t invalidExpectedChecksum() const { return parser_.invalidExpectedChecksum(); }
-  uint8_t invalidReceivedChecksum() const { return parser_.invalidReceivedChecksum(); }
-  uint32_t lastAvailable() const { return last_available_; }
-
-  void send(const uint8_t *cmd, uint8_t len)
-  {
-    AmpSerialLock lock;
-    serial_transport_note_command();
-    Serial1.write(0x55); Serial1.write(0x55); Serial1.write(0x55);
-    Serial1.write(len & 0xff);
-    uint8_t sum = 0;
-    for (uint8_t i = 0; i < len; ++i) {
-      const uint8_t c = cmd[i];
-      Serial1.write(c);
-      sum += c;
-    }
-    Serial1.write(sum);
-
-#if SPE_VERBOSE_PACKET_LOG
-    DebugSerialLock debug_lock;
-    Serial.print(F("TX command:"));
-    for (uint8_t i = 0; i < len; ++i) {
-      Serial.print(' ');
-      Serial.print(cmd[i], HEX);
-    }
-    Serial.println();
-#endif
-  }
-
-private:
-  ExpertPacketParser parser_;
-  uint32_t last_available_ = 0;
-};
-
-static AmpSerialLink amp_serial;
-
-static void process_next_queued_amp_command()
-{
-  QueuedAmpCommand queued;
-  if (!dequeue_amp_command(queued)) {
-    return;
-  }
-
-  amp_serial.send(queued.data, queued.len);
 }
 
 static void boot_log(const __FlashStringHelper *message)
@@ -746,7 +546,7 @@ static void print_controller_status()
   Serial.println(F(")"));
 #if SPE_BRINGUP_LEVEL >= 5
   Serial.print(F("serial1_available="));
-  Serial.println(amp_serial.available());
+  Serial.println(spe_expert1k_serial_available());
 #endif
 }
 
@@ -951,7 +751,7 @@ static void print_console_poll_status(unsigned long now)
 #if SPE_BRINGUP_LEVEL >= 5
   int serial1_available = 0;
   {
-    serial1_available = amp_serial.available();
+    serial1_available = spe_expert1k_serial_available();
   }
 #endif
 
@@ -1041,7 +841,7 @@ void setup() {
 
 #if SPE_BRINGUP_LEVEL >= 5
   boot_stage(7, F("serial1 begin"));
-  amp_serial.begin(); // Amp connection
+  spe_expert1k_serial_begin(); // Amp connection
 #endif
 
   Serial.println(F("Starting Expert1K controller"));
@@ -1189,30 +989,30 @@ void serial_task()
 
   // Check for serial data
   while (true) {
-    ExpertPacketParser::Result read_result = ExpertPacketParser::Result::None;
-    if (!amp_serial.read(read_result)) {
+    SpeExpert1kReadResult read_result;
+    if (!spe_expert1k_serial_read(read_result)) {
       break;
     }
     ++drained_bytes;
 
-    switch (read_result) {
+    switch (read_result.result) {
       case ExpertPacketParser::Result::PacketReady:
         serial_transport_note_valid_packet();
         completed_packet = true;
-        if (amp_serial.length() == 30) {
+        if (read_result.len == 30) {
           last_rcu = millis();
-          queue_amp_packet(amp_serial.packet(), amp_serial.length());
+          spe_expert1k_queue_packet(read_result.packet, read_result.len);
         } else {
-          process_packet(amp_serial.packet(), amp_serial.length());
+          process_packet(read_result.packet, read_result.len);
         }
         break;
       case ExpertPacketParser::Result::InvalidChecksum:
       {
         serial_transport_note_invalid_checksum(
-          amp_serial.invalidLength(),
-          amp_serial.invalidExpectedChecksum(),
-          amp_serial.invalidReceivedChecksum(),
-          amp_serial.lastAvailable());
+          read_result.invalid_len,
+          read_result.invalid_expected_checksum,
+          read_result.invalid_received_checksum,
+          read_result.last_available);
         break;
       }
       case ExpertPacketParser::Result::None:
@@ -1241,7 +1041,7 @@ void serial_task()
   }
 
     if (completed_packet) {
-      process_next_queued_amp_command();
+      spe_expert1k_process_next_queued_command();
     }
     rtos::ThisThread::sleep_for(1ms);
   }
@@ -1733,17 +1533,17 @@ bool send_command(std::initializer_list<uint8_t> cmd) {
 
   if (off_key) {
     amp_dtr_set(false);
-    if (!queue_amp_command(cmd)) {
+    if (!spe_expert1k_queue_command(cmd)) {
       return false;
     }
-    if (!queue_amp_command({Rcu_Off})) {
+    if (!spe_expert1k_queue_command({Rcu_Off})) {
       return false;
     }
     amp_remote_update_enabled = false;
     return true;
   }
 
-  return queue_amp_command(cmd);
+  return spe_expert1k_queue_command(cmd);
 }
 
 bool amp_control_press_key(const char *name)
