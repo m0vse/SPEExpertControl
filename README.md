@@ -44,7 +44,7 @@ The MAX3232 outputs should connect to the amplifier side of the D-type socket:
 | `T2OUT` | Pin 4, DTR | DTR asserted by controller |
 | `GND` | Pin 5, GND | Common signal ground |
 
-`D7` is assigned as `SPE_AMP_DTR_PIN`. The firmware asserts DTR during controller startup to request remote power-on. When the OFF button command is sent, the firmware sends `RCU_OFF`, releases DTR, and stops the periodic `RCU_ON` polling so the amplifier can power down. Pressing ON asserts DTR again and restarts remote console updates.
+`D7` is assigned as `SPE_AMP_DTR_PIN`. The firmware asserts DTR during controller startup to request remote power-on. When the OFF button command is sent, the firmware releases DTR immediately, sends the OFF key command and `RCU_OFF`, and stops the periodic `RCU_ON` polling so the amplifier can power down. Pressing ON asserts DTR again and restarts remote console updates. This behaviour is deliberately driven by the button commands rather than the last received amplifier state, so OFF can still release DTR if the amplifier is not currently responding.
 
 Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7` low to assert RS-232 DTR. If the wiring is moved later, change `SPE_AMP_DTR_PIN` in [src/main.cpp](src/main.cpp).
 
@@ -56,7 +56,7 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 - FreeRTOS split between UI and amplifier serial work
 - Mutex handling around LVGL, amplifier serial, and debug serial access
 - Saved WiFi credentials stored on the Giga QSPI filesystem
-- Hidden WiFi setup popup opened from the top-left of the display
+- Hidden setup popup opened from the top-left of the display for WiFi and display orientation
 - Background WiFi reconnect using saved credentials
 - Serial console commands for WiFi, amplifier status, scans, and diagnostics
 - DTR power-on output for waking the amplifier when it is switched off
@@ -79,40 +79,90 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 PlatformIO is the supported build path.
 
 ```powershell
-pio run -e giga_r1_m7_spe_expert1k
+pio run -e giga_r1_m7_spe_expert1k --target upload
 ```
 
-The default environment is `giga_r1_m7_spe_expert1k`. It targets the Arduino Giga R1 M7 core and currently uses `COM27` for upload and monitor.
+The default environment is `giga_r1_m7_spe_expert1k`. It targets the Arduino Giga R1 M7 core and currently uses `COM27` for upload and monitor. During normal development, use the upload target above so a successful build is immediately deployed. Avoid `pio clean` unless a clean rebuild is specifically needed because LVGL rebuilds are slow.
 
-## Upload
+## Build Only
+
+Use a build-only command only when explicitly checking compilation without deploying:
 
 ```powershell
-pio run -e giga_r1_m7_spe_expert1k --target upload
+pio run -e giga_r1_m7_spe_expert1k
 ```
 
 The environment uses DFU upload. If the board is already in DFU mode, PlatformIO should still upload the generated firmware binary.
 
 ## Serial Console
 
-The debug serial monitor runs at `115200` baud.
+The debug serial monitor runs on `Serial` at `115200` baud. PlatformIO is configured to monitor `COM27`:
 
-Useful commands:
+```powershell
+pio device monitor -e giga_r1_m7_spe_expert1k
+```
 
-- `help` - show available console commands
-- `status` - print controller summary
-- `wifi` - print WiFi status, firmware version, IP, and RSSI
-- `amp` - print the last amplifier status packet
-- `scan` - run a blocking WiFi scan and print results
-- `rcu` - send `RCU_ON` to the amplifier
-- `dtr` - print the configured amplifier DTR output pin and GPIO level
-- `wifi-popup` - open the hidden WiFi setup popup
-- `wifi-saved` - show whether saved WiFi credentials exist
-- `wifi-clear` - clear saved WiFi credentials
-- `poll on` / `poll off` - enable or disable periodic console status polling
+Commands are line based, case-insensitive, and are submitted with Enter. Backspace is supported while entering a command.
 
-## WiFi
+### Console Commands
 
-WiFi is configured from a hidden popup on the LCD. Tap the top-left of the display to open it. Use `Search` to scan, select an SSID, enter the password, and press `Connect`.
+| Command | Alias | Description |
+| --- | --- | --- |
+| `help` | `?` | Show the firmware command list. |
+| `status` | - | Print controller uptime, boot progress, touch state, transformed input-device count, current screen, and `serial1_available` when high bring-up diagnostics are enabled. |
+| `wifi` | - | Print WiFi status code/name, WiFi firmware version, setup connection state, saved-credential state, and SSID/IP/RSSI when connected. |
+| `web` | - | Print HTTP server counters, including starts, disconnects, client count, request counts, bad key requests, and the last request path/time. |
+| `serial` | `ser` | Print amplifier UART health counters. Use this when checking checksum errors, queue depth, missed packets, or whether the serial task is falling behind. |
+| `amp` | - | Print the last decoded 30-byte amplifier status packet, screen name, DTR state, band, input, antenna, CAT mode, output power setting, power, reflected power, SWR/gain, temperature, PA voltage, and PA current. |
+| `scan` | - | Run a blocking WiFi scan and print SSID, RSSI, and encryption type for each network. The LCD and web UI continue to use the background WiFi services; this command is mainly for diagnostics. |
+| `stats` | `mem` | Print Mbed runtime statistics: uptime, idle/sleep times, heap usage, stack usage, and RTOS thread state/priority/free stack. |
+| `reboot` | `reset` | Reboot the controller with `NVIC_SystemReset()`. |
+| `rcu` | - | Queue an `RCU_ON` command to the amplifier. |
+| `dtr` | - | Print the configured DTR pin, logical asserted state, and actual GPIO level. With the current MAX3232 wiring, asserted DTR is `D7 LOW`. |
+| `setup` | `wifi-popup` | Open the hidden controller setup popup on the LCD. This is the same panel opened by tapping the top-left of the display. |
+| `wifi-saved` | - | Print whether saved WiFi credentials exist, the saved SSID, and password length. The password itself is not printed. |
+| `wifi-clear` | - | Clear saved WiFi credentials and schedule background reconnect retry state accordingly. |
+| `poll on` | - | Enable periodic 2-second controller status lines on the debug console. |
+| `poll off` | - | Disable periodic controller status lines. |
+
+### Serial Diagnostics
+
+The `serial` command prints amplifier-link counters:
+
+- `rx_bytes` - bytes read from `Serial1`.
+- `valid_packets` - valid 30-byte amplifier packets received.
+- `invalid_checksums` - packets rejected by checksum.
+- `max_available` - highest observed `Serial1.available()` backlog.
+- `max_task_gap_ms` - longest observed gap between serial task service passes.
+- `max_rx_byte_gap_us` - longest observed gap between received UART bytes.
+- `max_drain_burst` - largest number of bytes drained in one service pass.
+- `max_queue_depth` and `queued_packets_dropped` - decoded packet queue pressure between serial and UI/status publishing.
+- `max_command_queue_depth` and `queued_commands_dropped` - outbound command queue pressure.
+- `commands_sent` - amplifier commands transmitted.
+- `last_checksum_error_ms` - `millis()` timestamp of the last checksum failure.
+- `checksum_sync_resyncs` - checksum failures where the parser also detected sync bytes inside the bad packet.
+- `last_bad_available`, `last_bad_packet_len`, `last_bad_checksum_expected`, and `last_bad_checksum_received` - context for the most recent checksum failure.
+
+### Web Diagnostics
+
+The `web` command prints HTTP server counters:
+
+- `server_starts` - number of times the HTTP server was started after WiFi connection.
+- `wifi_disconnects` - transitions from connected WiFi to disconnected.
+- `clients` and `empty_requests` - accepted clients and clients that did not send a request line.
+- `index`, `status`, `key`, and `logo` - request counters for `/`, `/api/status`, `/api/key?name=...`, and `/spe-logo.svg`.
+- `bad_key_requests` - key endpoint requests with an unrecognised button name.
+- `last_request_ms` and `path` - `millis()` timestamp and normalized path for the most recent request.
+
+### Runtime Diagnostics
+
+The `stats` command reports Mbed heap, stack, CPU, and RTOS thread data. Thread names currently include the main Arduino task plus the firmware's UI, console, WiFi, and amplifier serial tasks where the runtime exposes their names.
+
+## Setup And WiFi
+
+WiFi and display orientation are configured from a hidden setup popup on the LCD. Tap the top-left of the display or run the serial console `setup` command to open it.
+
+Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option for mounting the controller upside down.
 
 Credentials are stored on the Giga QSPI filesystem. On restart, the firmware loads saved credentials and attempts to reconnect in the background. Failed attempts time out and are retried periodically without blocking the amplifier UI or serial control.
 
