@@ -180,12 +180,6 @@ bool amp_status_valid = false;
 static bool amp_remote_update_enabled = true;
 static Expert_Packet web_cat_snapshot{};
 static unsigned long web_cat_snapshot_until = 0;
-static bool published_amp_status_valid = false;
-static ExpertScreen published_screen = BootMessage;
-static Expert_Packet published_last_status{};
-static Expert_Packet published_web_cat_snapshot{};
-static unsigned long published_web_cat_snapshot_until = 0;
-static uint32_t published_status_sequence = 0;
 int transformed_touch_devices = 0;
 struct AmpSerialStats {
   uint32_t rx_bytes = 0;
@@ -230,7 +224,6 @@ static uint8_t amp_command_queue_count = 0;
 static rtos::Mutex lvgl_mutex;
 static rtos::Mutex amp_serial_mutex;
 static rtos::Mutex debug_serial_mutex;
-static rtos::Mutex amp_status_mutex;
 static rtos::Mutex amp_serial_stats_mutex;
 static rtos::Mutex amp_packet_queue_mutex;
 static rtos::Mutex amp_command_queue_mutex;
@@ -256,12 +249,6 @@ class DebugSerialLock {
 public:
   DebugSerialLock() { debug_serial_mutex.lock(); }
   ~DebugSerialLock() { debug_serial_mutex.unlock(); }
-};
-
-class AmpStatusLock {
-public:
-  AmpStatusLock() { amp_status_mutex.lock(); }
-  ~AmpStatusLock() { amp_status_mutex.unlock(); }
 };
 
 class AmpSerialStatsLock {
@@ -731,19 +718,13 @@ static void print_serial_status()
 
 static void print_amp_status()
 {
-  bool status_valid = false;
-  ExpertScreen status_screen = BootMessage;
-  Expert_Packet status{};
-  {
-    AmpStatusLock status_lock;
-    status_valid = published_amp_status_valid;
-    status_screen = published_screen;
-    status = published_last_status;
-  }
+  const AppStatusSnapshot snapshot = app_status_snapshot();
+  const ExpertScreen status_screen = snapshot.screen;
+  const Expert_Packet &status = snapshot.status;
 
   DebugSerialLock debug_lock;
   Serial.print(F("Amp status valid="));
-  Serial.println(status_valid ? F("yes") : F("no"));
+  Serial.println(snapshot.valid ? F("yes") : F("no"));
   Serial.print(F("screen="));
   Serial.print(static_cast<int>(status_screen));
   Serial.print(F(" ("));
@@ -758,7 +739,7 @@ static void print_amp_status()
   Serial.print(F(" gpio_level="));
   Serial.println(amp_dtr_gpio_level() == HIGH ? F("HIGH") : F("LOW"));
 
-  if (!status_valid) {
+  if (!snapshot.valid) {
     Serial.println(F("No 30-byte amplifier status packet received yet"));
     return;
   }
@@ -792,145 +773,6 @@ static void print_amp_status()
   Serial.print(float(status.voltage) / 10);
   Serial.print(F(" current="));
   Serial.println(float(status.current) / 10);
-}
-
-static void json_print_string(Print &out, const char *value)
-{
-  out.print('"');
-  if (value) {
-    for (const char *p = value; *p; ++p) {
-      if (*p == '"' || *p == '\\') {
-        out.print('\\');
-      }
-      out.print(*p);
-    }
-  }
-  out.print('"');
-}
-
-void app_status_print_json(Print &out)
-{
-  bool status_valid = false;
-  ExpertScreen current_screen = BootMessage;
-  Expert_Packet status{};
-  {
-    AmpStatusLock status_lock;
-    status_valid = published_amp_status_valid;
-    current_screen = published_screen;
-    const bool show_cat_snapshot = status_valid && current_screen == Cat_Screen && published_web_cat_snapshot_until != 0;
-    status = show_cat_snapshot ? published_web_cat_snapshot : published_last_status;
-    if (show_cat_snapshot) {
-      current_screen = Cat_Screen;
-    }
-  }
-
-  out.print(F("{\"valid\":"));
-  out.print(status_valid ? F("true") : F("false"));
-  out.print(F(",\"screen\":"));
-  out.print(static_cast<int>(current_screen));
-  out.print(F(",\"screenName\":"));
-  json_print_string(out, screen_name(current_screen));
-
-  if (!status_valid) {
-    out.print(F("}"));
-    return;
-  }
-
-  const uint8_t band_idx = (status.band_input >> 4) & 0x0f;
-  const uint8_t input_idx = status.band_input & 0x01;
-  const uint8_t ants_idx = status.antenna_cat & 0x07;
-  const uint8_t cat_idx = (status.antenna_cat >> 4) & 0x07;
-  const uint8_t out_idx = (status.flags >> 4) & 0x01;
-  const bool swr_alarm = ((status.flags >> 3) & 0x01) != 0;
-  SpeStatusView status_view(status);
-
-  out.print(F(",\"flags\":"));
-  out.print(status.flags);
-  out.print(F(",\"displayCtx\":"));
-  out.print(status.display_ctx);
-  out.print(F(",\"opStatus\":"));
-  out.print(status_view.op_status());
-  out.print(F(",\"freq\":"));
-  out.print(status.freq);
-  out.print(F(",\"subBand\":"));
-  out.print(status.sub_band);
-  out.print(F(",\"setup\":["));
-  for (uint8_t i = 0; i < COUNT_OF(status.setup); ++i) {
-    if (i) {
-      out.print(',');
-    }
-    out.print(status.setup[i]);
-  }
-  out.print(']');
-  out.print(F(",\"input\":"));
-  json_print_string(out, input_idx < COUNT_OF(inputs) ? inputs[input_idx] : "?");
-  out.print(F(",\"band\":"));
-  json_print_string(out, band_idx < COUNT_OF(bands) ? bands[band_idx] : "?");
-  out.print(F(",\"antenna\":"));
-  json_print_string(out, ants_idx < COUNT_OF(antennas) ? antennas[ants_idx] : "?");
-  out.print(F(",\"cat\":"));
-  json_print_string(out, cat_idx < COUNT_OF(cats) ? cats[cat_idx] : "?");
-  out.print(F(",\"out\":"));
-  json_print_string(out, out_idx < COUNT_OF(outs) ? outs[out_idx] : "?");
-  out.print(F(",\"power\":"));
-  out.print(float(status.power) / 10.0f, 1);
-  out.print(F(",\"reverse\":"));
-  out.print(float(status.rev_power) / 10.0f, 1);
-  out.print(F(",\"swr\":"));
-  if (swr_alarm) {
-    json_print_string(out, "--.--");
-  } else {
-    char swr[8];
-    snprintf(swr, sizeof(swr), "%.2f", float(status.swr_gain) / 100.0f);
-    json_print_string(out, swr);
-  }
-  out.print(F(",\"temp\":"));
-  char temp[12];
-  snprintf(temp, sizeof(temp), "%d%s", status.temp, tscales[(status.flags >> 7) & 0x01]);
-  json_print_string(out, temp);
-  out.print(F(",\"voltage\":"));
-  out.print(float(status.voltage) / 10.0f, 1);
-  out.print(F(",\"current\":"));
-  out.print(float(status.current) / 10.0f, 1);
-  out.print(F(",\"meterPowerLabel\":"));
-  json_print_string(out, status_view.power_label());
-  out.print(F(",\"meterPower\":"));
-  out.print(float(status_view.power_raw_tenths()) / 10.0f, 1);
-  out.print(F(",\"meterPowerMax\":"));
-  out.print(status_view.power_bar_max());
-  out.print(F(",\"meterPowerSuffix\":"));
-  json_print_string(out, status_view.power_value_suffix());
-  out.print(F(",\"meterPowerScale\":["));
-  for (uint8_t i = 0; i < 5; ++i) {
-    if (i) {
-      out.print(',');
-    }
-    json_print_string(out, status_view.power_scale_label(i));
-  }
-  out.print(']');
-  out.print(F(",\"meterPaLabel\":"));
-  json_print_string(out, status_view.pa_label());
-  out.print(F(",\"meterPa\":"));
-  out.print(float(status_view.pa_raw_tenths()) / 10.0f, 1);
-  out.print(F(",\"meterPaMax\":"));
-  out.print(status_view.pa_bar_max());
-  out.print(F(",\"meterPaSuffix\":"));
-  json_print_string(out, status_view.pa_value_suffix());
-  out.print(F(",\"meterPaScale\":["));
-  for (uint8_t i = 0; i < 5; ++i) {
-    if (i) {
-      out.print(',');
-    }
-    json_print_string(out, status_view.pa_scale_label(i));
-  }
-  out.print(']');
-  out.print(F("}"));
-}
-
-uint32_t app_status_sequence(void)
-{
-  AmpStatusLock status_lock;
-  return published_status_sequence;
 }
 
 static constexpr int meter_bar_x = 136;
@@ -1008,11 +850,8 @@ static void configure_transmit_meters(const SpeStatusView &status)
 
 static void print_controller_status()
 {
-  ExpertScreen status_screen = BootMessage;
-  {
-    AmpStatusLock status_lock;
-    status_screen = published_screen;
-  }
+  const AppStatusSnapshot snapshot = app_status_snapshot();
+  const ExpertScreen status_screen = snapshot.screen;
 
   DebugSerialLock debug_lock;
   Serial.print(F("Controller ms="));
@@ -1571,13 +1410,13 @@ void web_task()
 
 static void publish_amp_status_snapshot()
 {
-  AmpStatusLock status_lock;
-  published_amp_status_valid = amp_status_valid;
-  published_screen = screen;
-  published_last_status = last_status;
-  published_web_cat_snapshot = web_cat_snapshot;
-  published_web_cat_snapshot_until = web_cat_snapshot_until;
-  ++published_status_sequence;
+  AppStatusSnapshot snapshot;
+  snapshot.valid = amp_status_valid;
+  snapshot.screen = screen;
+  snapshot.status = last_status;
+  snapshot.web_cat_snapshot = web_cat_snapshot;
+  snapshot.web_cat_snapshot_until = web_cat_snapshot_until;
+  app_status_publish(snapshot);
 }
 
 void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
