@@ -1433,33 +1433,22 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
 
       // Standby/Operate screen data
 
-      int8_t band_idx = (packet_in.band_input >> 4) & 0x0f;
-      int8_t input_idx = (packet_in.band_input) & 0x01;
-      int8_t ants_idx = (packet_in.antenna_cat) & 0x07;
-      int8_t cat_idx = (packet_in.antenna_cat >> 4) & 0x07;
-      int8_t out_idx = (packet_in.flags >> 4) & 0x01;
-      if (band_idx >= COUNT_OF(bands) || input_idx >= COUNT_OF(inputs) || ants_idx >= COUNT_OF(antennas) || cat_idx >= COUNT_OF(cats) || out_idx >= COUNT_OF(outs)) {
-            DebugSerialLock debug_lock;
-            Serial.println("Value exceeds allowed number, aborting update..");
-            return;
-      }
-
       if (scr == Operate_RX || scr == Operate_TX || (((packet_in.flags >> 2) & 0x01) != 0 && scr == Receive_Screen)) {
         configure_transmit_meters(packet_status);
       }
     
       if (last_status.band_input != packet_in.band_input) {
-        lv_label_set_text_fmt(ui_bandLabel, "BAND\n%s", bands[band_idx]);
-        lv_label_set_text_fmt(ui_inLabel,"IN\n%s",inputs[input_idx]);      
+        lv_label_set_text_fmt(ui_bandLabel, "BAND\n%s", packet_status.band);
+        lv_label_set_text_fmt(ui_inLabel,"IN\n%s", packet_status.input);
       }
 
       if (last_status.antenna_cat != packet_in.antenna_cat) {
-        lv_label_set_text_fmt(ui_antLabel,"ANT\n%s",antennas[ants_idx]); // only 3 bits
-        lv_label_set_text_fmt(ui_catLabel,"CAT\n%s",cats[cat_idx]); // only 3 bits     
+        lv_label_set_text_fmt(ui_antLabel,"ANT\n%s", packet_status.antenna);
+        lv_label_set_text_fmt(ui_catLabel,"CAT\n%s", packet_status.cat);
       }
 
       if (last_status.flags != packet_in.flags) {
-        lv_label_set_text_fmt(ui_outLabel,"OUT\n%s",outs[out_idx]);      
+        lv_label_set_text_fmt(ui_outLabel,"OUT\n%s", packet_status.out);
       }
 
       SpeStatusView previous_status(last_status);
@@ -1474,14 +1463,11 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
       }
 
       if (last_status.swr_gain != packet_in.swr_gain) {
-        if (packet_in.swr_gain == 0)
-          lv_label_set_text(ui_swrLabel,"SWR\n--.--");
-        else
-          lv_label_set_text_fmt(ui_swrLabel,"SWR\n%*.2f",5,float(packet_in.swr_gain)/100.0);
+        lv_label_set_text_fmt(ui_swrLabel,"SWR\n%s", packet_status.swr);
       }
 
       if (last_status.temp != packet_in.temp) {
-        lv_label_set_text_fmt(ui_tempLabel,"TEMP\n%d%s",packet_in.temp,tscales[(packet_in.flags >> 7) & 0x01]);
+        lv_label_set_text_fmt(ui_tempLabel,"TEMP\n%s", packet_status.temp);
       }
 
 #if SPE_VERBOSE_PACKET_LOG
