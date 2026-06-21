@@ -68,8 +68,6 @@ void console_task(void);
 void wifi_task(void);
 void web_task(void);
 
-const char* outs[] = {"HALF", "FULL"};
-
 const char* tscales[] = {"°F", "°C"};
 
 const char* startup[] = {"Standby", "Operate"};
@@ -77,21 +75,6 @@ const char* startup[] = {"Standby", "Operate"};
 const char* onoff[] = {"Off", "On "};
 
 const char* inputs[] = {"1", "2"};
-
-const char* ordinals[] = {"1st","2nd","3rd","4th"};
-
-const char* antennas[] = {"1","2","3","4"};
-
-const char* bands[] = {"160 m","80 m","40 m","30 m","20 m","17 m","15 m","12 m","10 m","6 m"};
-
-const char* cats[] = {"SPE","ICOM","KENWD","YAESU","TTEC","FLEX","RS232","NONE" };
-
-const char* cat_icom[] = {"CI-V","VOLTAGE_BAND"};
-
-const char* cat_yaesu[] = {"FT 100","FT 757 GX2","FT 817/847","FT 840/890","FT 897","FT 900","FT 920","FT 990","FT 1000","FT 1000 MP1",
-                            "FT 1000 MP2","FT 1000 MP3","FT 2000","FT 9000D","BAND_DATA"};
-
-const char* cat_tentec[] = {"OMNI VII","ORION I/II","JUPITER","ARGONAUT"};
 
 const char* warnings[] = {"0x10: DEBUGGING (IGNORE)",        "POWER MANAGEMENT : V PA < 20 V", 
                           "POWER MANAGEMENT : V PA < 26 V",  "POWER MANAGEMENT : V PA > 50 V",
@@ -128,22 +111,6 @@ const char* setup_messages[] = {
   "-- TEMPERATURE VALUE SHOWN IN °C/°F --",
   "---------- LEAVE THIS MENU -----------"
 };
-
-const char* ant_messages[] = {
-  "--- Set %s ANTENNA FOR 160 m BAND ---",
-  "---- Set %s ANTENNA FOR 80 m BAND ---",
-  "---- Set %s ANTENNA FOR 40 m BAND ---",
-  "---- Set %s ANTENNA FOR 30 m BAND ---",
-  "---- Set %s ANTENNA FOR 20 m BAND ---",
-  "---- Set %s ANTENNA FOR 17 m BAND ---",
-  "---- Set %s ANTENNA FOR 15 m BAND ---",
-  "---- Set %s ANTENNA FOR 12 m BAND ---",
-  "---- Set %s ANTENNA FOR 10 m BAND ---",
-  "---- Set %s ANTENNA FOR 6 m BAND ----",
-  "------- SAVE SETTINGS AND EXIT -------"
-};
-
-const char* ant_num[] = { " 1", " 2", " 3", " 4","NO" };
 
 // Setup options menu items
 //static lv_obj_t *setup_options_items[] {ui_setupAntenna,ui_setupCat,ui_setupManualTune,ui_setupBacklight,ui_setupContest,ui_setupBeep,ui_setupStart,ui_setupTemp,ui_setupQuit};
@@ -1113,16 +1080,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
             lv_label_set_text_fmt(ui_setupHeaderText,headings[0],inputs[packet_in.band_input & 0x01]);
             break;
           case Set_Antenna:
-            lv_obj_remove_flag(ui_setupAntOptions, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text_fmt(ui_setupAntHeaderText,headings[1],inputs[packet_in.band_input & 0x01]);
-            // Populate all labels
-            for (int f=0;f<10;f++)
-            {
-              for (int g=0;g<2;g++)
-              {
-                lv_label_set_text(setup_ant_items[(f*2)+g],ant_num[(packet_in.setup[f+1] >> (g*4)) & 0x07]);
-              }
-            }
+            spe_expert1k_show_antenna_setup_screen(packet_in, setup_ant_items, COUNT_OF(setup_ant_items));
             break;
           case Set_Cat:
             lv_obj_remove_flag(ui_setupCatOptions, LV_OBJ_FLAG_HIDDEN);
@@ -1216,32 +1174,8 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
         }
         else if (scr == Set_Antenna) 
         {
-          // Setup_Options Menu has changed.
-          // The documentation appears to be incorrect. It suggests that the setup[0] defines the band 
-          // and in each other setup bit 7 shows the current selected ant.
-          // This does not appear to be the case, as setup[0] goes up to 20!
-          uint8_t index = packet_in.setup[0];
-          if (index > 20) index = 20;  // clamp to last valid
-
-          uint8_t idx = index / 2;
-          if (idx >= COUNT_OF(ant_messages)) idx = COUNT_OF(ant_messages) - 1;
-
-          uint8_t ord = index % 2;
-          if (ord >= COUNT_OF(ordinals)) ord = 0; // safety
-
-          uint8_t raw = (packet_in.setup[idx+1] >> (ord*4)) & 0x07;
-          if (raw >= COUNT_OF(ant_num)) raw = COUNT_OF(ant_num) - 1;
-
-          lv_label_set_text_fmt(ui_setupAntFooterText,ant_messages[idx],ordinals[ord]); 
-          if (index < 20) // Don't change label of SAVE!     
-          {
-            lv_label_set_text(setup_ant_items[index],ant_num[(packet_in.setup[idx+1] >> (ord*4)) & 0x07]);
-            if (setup_ant_ctrl.selected() == 20) { // Was previously SAVE
-              lv_label_set_text(ui_setupAntBottomLabel,headings[7]);
-            }
-          } else {
-            lv_label_set_text(ui_setupAntBottomLabel,headings[8]);
-          }
+          const uint8_t index = spe_expert1k_update_antenna_setup_screen(
+            packet_in, setup_ant_items, COUNT_OF(setup_ant_items), setup_ant_ctrl.selected());
           setup_ant_ctrl.applySelection(index);
         }
         else if (scr == Set_Cat) 
@@ -1266,44 +1200,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
         }
         else if (scr == Manual_Tune)
         {
-          // Update ManualTune contents
-          lv_label_set_text_fmt(ui_manualTuneFreq,"%*.3f MHz",6,float(packet_in.freq)/1000.0);
-          lv_label_set_text_fmt(ui_manualTuneSubBand,"%*d",3,packet_in.sub_band);
-
-          lv_label_set_text_fmt(ui_manualTuneuHLabel,"%*.1f uH",7,float(packet_in.setup[1])/10.0);
-          lv_bar_set_value(ui_manualTuneuH, packet_in.setup[1], LV_ANIM_ON);
-
-
-
-
-          uint8_t lo = packet_in.setup[2];
-          uint8_t hi = packet_in.setup[3] & 0x03;
-          uint16_t raw = (static_cast<uint16_t>((hi) << 8) | lo);
-
-#if SPE_VERBOSE_PACKET_LOG
-          {
-            DebugSerialLock debug_lock;
-            Serial.print("Low:");
-            Serial.print(lo);
-            Serial.print(" High:");
-            Serial.println(hi);
-
-            for (int i = 9; i >= 0; --i) Serial.print((raw >> i) & 1);
-            Serial.println();
-          }
-#endif
-          
-          static const double weights[10] = { 5.2, 6.5, 12.5, 21.0, 40.9, 86.5, 168.0, 342.0, 693.5, 1384.5 };
-
-          double pF = 0.0;
-          for (int i = 0; i < 10; ++i) {
-              if (raw & (1u << i)) {
-                  pF += weights[i];
-              }
-          }
-
-          lv_label_set_text_fmt(ui_manualTunepFLabel,"%*.1f pF",7,pF);
-          lv_bar_set_value(ui_manualTunepF, pF, LV_ANIM_ON);
+          spe_expert1k_update_manual_tune_screen(packet_in);
         }
         else if (scr == Backlight)
         {
