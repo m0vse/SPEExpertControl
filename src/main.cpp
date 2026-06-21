@@ -24,6 +24,7 @@
 #include "models/spe_expert1k/packet_parser.h"
 #include "models/spe_expert1k/protocol.h"
 #include "models/spe_expert1k/status_view.h"
+#include "serial/transport_stats.h"
 #include "ui/menu_control.h"
 
 #if SPE_ENABLE_WEB_SERVER
@@ -181,27 +182,6 @@ static bool amp_remote_update_enabled = true;
 static Expert_Packet web_cat_snapshot{};
 static unsigned long web_cat_snapshot_until = 0;
 int transformed_touch_devices = 0;
-struct AmpSerialStats {
-  uint32_t rx_bytes = 0;
-  uint32_t valid_packets = 0;
-  uint32_t invalid_checksums = 0;
-  uint32_t commands_sent = 0;
-  uint32_t max_available = 0;
-  uint32_t max_task_gap_ms = 0;
-  uint32_t max_rx_byte_gap_us = 0;
-  uint32_t max_drain_burst = 0;
-  uint32_t queued_packets_dropped = 0;
-  uint32_t max_queue_depth = 0;
-  uint32_t queued_commands_dropped = 0;
-  uint32_t max_command_queue_depth = 0;
-  uint32_t last_checksum_error_ms = 0;
-  uint32_t checksum_sync_resyncs = 0;
-  uint32_t last_bad_available = 0;
-  uint8_t last_bad_packet_len = 0;
-  uint8_t last_bad_checksum_expected = 0;
-  uint8_t last_bad_checksum_received = 0;
-};
-static AmpSerialStats amp_serial_stats;
 static const uint8_t AMP_PACKET_QUEUE_SIZE = 8;
 static const uint8_t AMP_COMMAND_QUEUE_SIZE = 16;
 static const uint8_t AMP_COMMAND_MAX_LEN = 4;
@@ -224,7 +204,6 @@ static uint8_t amp_command_queue_count = 0;
 static rtos::Mutex lvgl_mutex;
 static rtos::Mutex amp_serial_mutex;
 static rtos::Mutex debug_serial_mutex;
-static rtos::Mutex amp_serial_stats_mutex;
 static rtos::Mutex amp_packet_queue_mutex;
 static rtos::Mutex amp_command_queue_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
@@ -251,12 +230,6 @@ public:
   ~DebugSerialLock() { debug_serial_mutex.unlock(); }
 };
 
-class AmpSerialStatsLock {
-public:
-  AmpSerialStatsLock() { amp_serial_stats_mutex.lock(); }
-  ~AmpSerialStatsLock() { amp_serial_stats_mutex.unlock(); }
-};
-
 class AmpPacketQueueLock {
 public:
   AmpPacketQueueLock() { amp_packet_queue_mutex.lock(); }
@@ -269,98 +242,6 @@ public:
   ~AmpCommandQueueLock() { amp_command_queue_mutex.unlock(); }
 };
 
-static void amp_serial_note_available(uint32_t available)
-{
-  AmpSerialStatsLock lock;
-  if (available > amp_serial_stats.max_available) {
-    amp_serial_stats.max_available = available;
-  }
-}
-
-static void amp_serial_note_task_gap(uint32_t gap_ms)
-{
-  AmpSerialStatsLock lock;
-  if (gap_ms > amp_serial_stats.max_task_gap_ms) {
-    amp_serial_stats.max_task_gap_ms = gap_ms;
-  }
-}
-
-static void amp_serial_note_drain_burst(uint32_t bytes)
-{
-  AmpSerialStatsLock lock;
-  if (bytes > amp_serial_stats.max_drain_burst) {
-    amp_serial_stats.max_drain_burst = bytes;
-  }
-}
-
-static void amp_serial_note_rx_byte(uint32_t now_us)
-{
-  AmpSerialStatsLock lock;
-  ++amp_serial_stats.rx_bytes;
-  static uint32_t last_rx_us = 0;
-  if (last_rx_us != 0) {
-    const uint32_t gap_us = now_us - last_rx_us;
-    if (gap_us > amp_serial_stats.max_rx_byte_gap_us) {
-      amp_serial_stats.max_rx_byte_gap_us = gap_us;
-    }
-  }
-  last_rx_us = now_us;
-}
-
-static void amp_serial_note_valid_packet()
-{
-  AmpSerialStatsLock lock;
-  ++amp_serial_stats.valid_packets;
-}
-
-static void amp_serial_note_invalid_checksum(uint8_t len, uint8_t expected, uint8_t received, uint32_t available)
-{
-  AmpSerialStatsLock lock;
-  ++amp_serial_stats.invalid_checksums;
-  amp_serial_stats.last_checksum_error_ms = millis();
-  if (received == 0xAA) {
-    ++amp_serial_stats.checksum_sync_resyncs;
-  }
-  amp_serial_stats.last_bad_available = available;
-  amp_serial_stats.last_bad_packet_len = len;
-  amp_serial_stats.last_bad_checksum_expected = expected;
-  amp_serial_stats.last_bad_checksum_received = received;
-}
-
-static void amp_serial_note_command()
-{
-  AmpSerialStatsLock lock;
-  ++amp_serial_stats.commands_sent;
-}
-
-static void amp_serial_note_packet_drop()
-{
-  AmpSerialStatsLock lock;
-  ++amp_serial_stats.queued_packets_dropped;
-}
-
-static void amp_serial_note_queue_depth(uint32_t depth)
-{
-  AmpSerialStatsLock lock;
-  if (depth > amp_serial_stats.max_queue_depth) {
-    amp_serial_stats.max_queue_depth = depth;
-  }
-}
-
-static void amp_serial_note_command_drop()
-{
-  AmpSerialStatsLock lock;
-  ++amp_serial_stats.queued_commands_dropped;
-}
-
-static void amp_serial_note_command_queue_depth(uint32_t depth)
-{
-  AmpSerialStatsLock lock;
-  if (depth > amp_serial_stats.max_command_queue_depth) {
-    amp_serial_stats.max_command_queue_depth = depth;
-  }
-}
-
 static void queue_amp_packet(const Expert_Packet &packet, uint8_t len)
 {
   uint8_t depth = 0;
@@ -369,7 +250,7 @@ static void queue_amp_packet(const Expert_Packet &packet, uint8_t len)
     if (amp_packet_queue_count >= AMP_PACKET_QUEUE_SIZE) {
       amp_packet_queue_tail = (amp_packet_queue_tail + 1) % AMP_PACKET_QUEUE_SIZE;
       --amp_packet_queue_count;
-      amp_serial_note_packet_drop();
+      serial_transport_note_packet_drop();
     }
 
     amp_packet_queue[amp_packet_queue_head].packet = packet;
@@ -378,7 +259,7 @@ static void queue_amp_packet(const Expert_Packet &packet, uint8_t len)
     ++amp_packet_queue_count;
     depth = amp_packet_queue_count;
   }
-  amp_serial_note_queue_depth(depth);
+  serial_transport_note_queue_depth(depth);
 }
 
 static bool queue_amp_command(std::initializer_list<uint8_t> cmd)
@@ -391,7 +272,7 @@ static bool queue_amp_command(std::initializer_list<uint8_t> cmd)
   {
     AmpCommandQueueLock lock;
     if (amp_command_queue_count >= AMP_COMMAND_QUEUE_SIZE) {
-      amp_serial_note_command_drop();
+      serial_transport_note_command_drop();
       return false;
     }
 
@@ -406,7 +287,7 @@ static bool queue_amp_command(std::initializer_list<uint8_t> cmd)
     ++amp_command_queue_count;
     depth = amp_command_queue_count;
   }
-  amp_serial_note_command_queue_depth(depth);
+  serial_transport_note_command_queue_depth(depth);
   return true;
 }
 
@@ -457,7 +338,7 @@ public:
     AmpSerialLock lock;
     const int available_bytes = Serial1.available();
     last_available_ = available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes);
-    amp_serial_note_available(last_available_);
+    serial_transport_note_available(last_available_);
     return available_bytes;
   }
 
@@ -468,14 +349,14 @@ public:
       AmpSerialLock lock;
       const int available_bytes = Serial1.available();
       last_available_ = available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes);
-      amp_serial_note_available(last_available_);
+      serial_transport_note_available(last_available_);
       if (available_bytes <= 0) {
         return false;
       }
       value = Serial1.read();
     }
 
-    amp_serial_note_rx_byte(micros());
+    serial_transport_note_rx_byte(micros());
     result = parser_.read(static_cast<uint8_t>(value));
     return true;
   }
@@ -490,7 +371,7 @@ public:
   void send(const uint8_t *cmd, uint8_t len)
   {
     AmpSerialLock lock;
-    amp_serial_note_command();
+    serial_transport_note_command();
     Serial1.write(0x55); Serial1.write(0x55); Serial1.write(0x55);
     Serial1.write(len & 0xff);
     uint8_t sum = 0;
@@ -670,11 +551,7 @@ static void print_web_status()
 
 static void print_serial_status()
 {
-  AmpSerialStats snapshot;
-  {
-    AmpSerialStatsLock lock;
-    snapshot = amp_serial_stats;
-  }
+  const SerialTransportStats snapshot = serial_transport_stats_snapshot();
 
   DebugSerialLock debug_lock;
   Serial.println(F("Amplifier serial stats:"));
@@ -1305,7 +1182,7 @@ void serial_task()
   uint32_t last_run_ms = millis();
   while (true) {
   const uint32_t now_ms = millis();
-  amp_serial_note_task_gap(now_ms - last_run_ms);
+  serial_transport_note_task_gap(now_ms - last_run_ms);
   last_run_ms = now_ms;
   uint32_t drained_bytes = 0;
   bool completed_packet = false;
@@ -1320,7 +1197,7 @@ void serial_task()
 
     switch (read_result) {
       case ExpertPacketParser::Result::PacketReady:
-        amp_serial_note_valid_packet();
+        serial_transport_note_valid_packet();
         completed_packet = true;
         if (amp_serial.length() == 30) {
           last_rcu = millis();
@@ -1331,7 +1208,7 @@ void serial_task()
         break;
       case ExpertPacketParser::Result::InvalidChecksum:
       {
-        amp_serial_note_invalid_checksum(
+        serial_transport_note_invalid_checksum(
           amp_serial.invalidLength(),
           amp_serial.invalidExpectedChecksum(),
           amp_serial.invalidReceivedChecksum(),
@@ -1342,7 +1219,7 @@ void serial_task()
         break;
     }
   }  
-  amp_serial_note_drain_burst(drained_bytes);
+  serial_transport_note_drain_burst(drained_bytes);
 
 // Send Rcu_On command if nothing received for over ten seconds.
   unsigned long now = millis();
