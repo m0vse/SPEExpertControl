@@ -28,3 +28,6 @@ uint8_t spe_expert1k_update_antenna_setup_screen(const Expert_Packet &packet,
                                                  size_t antenna_item_count,
                                                  uint8_t previous_selection);
 void spe_expert1k_update_manual_tune_screen(const Expert_Packet &packet);
+void spe_expert1k_update_status_values(const Expert_Packet &previous_packet,
+                                       const Expert_Packet &packet,
+                                       const AmpStatusSnapshot &status);

@@ -25,7 +25,6 @@
 #include "models/spe_expert1k/protocol.h"
 #include "models/spe_expert1k/serial_link.h"
 #include "models/spe_expert1k/status_adapter.h"
-#include "models/spe_expert1k/status_view.h"
 #include "serial/transport_stats.h"
 #include "ui/menu_control.h"
 
@@ -972,7 +971,6 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
     // Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,UnusedA,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
     // Set_BaudRate,Manual_Tune,Backlight,UnusedB,UnusedC,Alarm_History,Shutdown
     ExpertScreen scr = static_cast<ExpertScreen>(packet_in.display_ctx);
-    SpeStatusView packet_status_view(packet_in);
     AmpStatusSnapshot packet_status = spe_expert1k_make_status_snapshot(true, scr, packet_in);
     const unsigned long now = millis();
     const bool cat_hold_expired = screen == Cat_Screen && scr != Cat_Screen && now >= web_cat_snapshot_until;
@@ -1058,38 +1056,7 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
         spe_expert1k_configure_transmit_meters(packet_status);
       }
     
-      if (last_status.band_input != packet_in.band_input) {
-        lv_label_set_text_fmt(ui_bandLabel, "BAND\n%s", packet_status.band);
-        lv_label_set_text_fmt(ui_inLabel,"IN\n%s", packet_status.input);
-      }
-
-      if (last_status.antenna_cat != packet_in.antenna_cat) {
-        lv_label_set_text_fmt(ui_antLabel,"ANT\n%s", packet_status.antenna);
-        lv_label_set_text_fmt(ui_catLabel,"CAT\n%s", packet_status.cat);
-      }
-
-      if (last_status.flags != packet_in.flags) {
-        lv_label_set_text_fmt(ui_outLabel,"OUT\n%s", packet_status.out);
-      }
-
-      SpeStatusView previous_status(last_status);
-      if (previous_status.power_raw_tenths() != packet_status_view.power_raw_tenths()) {
-        lv_label_set_text_fmt(ui_pep, "%*.1f%s", 6, packet_status.power_meter.value, packet_status.power_meter.suffix);
-        lv_bar_set_value(ui_powerBar, static_cast<int32_t>(packet_status.power_meter.value), LV_ANIM_ON);
-      }
-
-      if (previous_status.pa_raw_tenths() != packet_status_view.pa_raw_tenths()) {
-        lv_label_set_text_fmt(ui_vPA, "%*.1f%s", 4, packet_status.pa_meter.value, packet_status.pa_meter.suffix);
-        lv_bar_set_value(ui_vBar, static_cast<int32_t>(packet_status.pa_meter.value), LV_ANIM_ON);
-      }
-
-      if (last_status.swr_gain != packet_in.swr_gain) {
-        lv_label_set_text_fmt(ui_swrLabel,"SWR\n%s", packet_status.swr);
-      }
-
-      if (last_status.temp != packet_in.temp) {
-        lv_label_set_text_fmt(ui_tempLabel,"TEMP\n%s", packet_status.temp);
-      }
+      spe_expert1k_update_status_values(last_status, packet_in, packet_status);
 
 #if SPE_VERBOSE_PACKET_LOG
       {

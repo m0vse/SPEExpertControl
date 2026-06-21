@@ -13,6 +13,7 @@
 
 #include "console/serial_console.h"
 #include "models/spe_expert1k/menuitems.h"
+#include "models/spe_expert1k/status_view.h"
 
 #define COUNT_OF_LOCAL(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
@@ -502,4 +503,43 @@ void spe_expert1k_update_manual_tune_screen(const Expert_Packet &packet)
 
   lv_label_set_text_fmt(ui_manualTunepFLabel, "%*.1f pF", 7, pF);
   lv_bar_set_value(ui_manualTunepF, pF, LV_ANIM_ON);
+}
+
+void spe_expert1k_update_status_values(const Expert_Packet &previous_packet,
+                                       const Expert_Packet &packet,
+                                       const AmpStatusSnapshot &status)
+{
+  if (previous_packet.band_input != packet.band_input) {
+    lv_label_set_text_fmt(ui_bandLabel, "BAND\n%s", status.band);
+    lv_label_set_text_fmt(ui_inLabel, "IN\n%s", status.input);
+  }
+
+  if (previous_packet.antenna_cat != packet.antenna_cat) {
+    lv_label_set_text_fmt(ui_antLabel, "ANT\n%s", status.antenna);
+    lv_label_set_text_fmt(ui_catLabel, "CAT\n%s", status.cat);
+  }
+
+  if (previous_packet.flags != packet.flags) {
+    lv_label_set_text_fmt(ui_outLabel, "OUT\n%s", status.out);
+  }
+
+  const SpeStatusView previous_status(previous_packet);
+  const SpeStatusView current_status(packet);
+  if (previous_status.power_raw_tenths() != current_status.power_raw_tenths()) {
+    lv_label_set_text_fmt(ui_pep, "%*.1f%s", 6, status.power_meter.value, status.power_meter.suffix);
+    lv_bar_set_value(ui_powerBar, static_cast<int32_t>(status.power_meter.value), LV_ANIM_ON);
+  }
+
+  if (previous_status.pa_raw_tenths() != current_status.pa_raw_tenths()) {
+    lv_label_set_text_fmt(ui_vPA, "%*.1f%s", 4, status.pa_meter.value, status.pa_meter.suffix);
+    lv_bar_set_value(ui_vBar, static_cast<int32_t>(status.pa_meter.value), LV_ANIM_ON);
+  }
+
+  if (previous_packet.swr_gain != packet.swr_gain) {
+    lv_label_set_text_fmt(ui_swrLabel, "SWR\n%s", status.swr);
+  }
+
+  if (previous_packet.temp != packet.temp) {
+    lv_label_set_text_fmt(ui_tempLabel, "TEMP\n%s", status.temp);
+  }
 }
