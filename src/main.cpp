@@ -23,8 +23,8 @@
 #include "models/spe_expert1k/lcd_renderer.h"
 #include "models/spe_expert1k/menuitems.h"
 #include "models/spe_expert1k/protocol.h"
+#include "models/spe_expert1k/runtime.h"
 #include "models/spe_expert1k/serial_link.h"
-#include "models/spe_expert1k/status_adapter.h"
 #include "serial/transport_stats.h"
 #include "ui/menu_control.h"
 
@@ -94,18 +94,11 @@ static lv_obj_t *setup_tentec_items[4];
 MenuController setup_baudrate_ctrl;
 static lv_obj_t *setup_baudrate_items[4];
 
-ExpertScreen screen = BootMessage;
-
 // Amplifier settings
-Expert_Packet last_status;
-unsigned long last_rcu=0;
 const unsigned long interval = 1000;
-const unsigned long cat_display_hold_ms = 6000;
 bool touch_ready = false;
-bool amp_status_valid = false;
-static Expert_Packet web_cat_snapshot{};
-static unsigned long web_cat_snapshot_until = 0;
 int transformed_touch_devices = 0;
+static SpeExpert1kRuntime amp_runtime;
 static rtos::Mutex lvgl_mutex;
 static rtos::Mutex debug_serial_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
@@ -332,7 +325,7 @@ static void print_amp_status()
   Serial.print(screen_name(status_screen));
   Serial.println(F(")"));
   Serial.print(F("last_rcu_ms="));
-  Serial.println(last_rcu);
+  Serial.println(amp_runtime.last_activity_ms());
   Serial.print(F("dtr_pin=D"));
   Serial.print(amp_dtr_pin());
   Serial.print(F(" asserted="));
@@ -604,7 +597,7 @@ static void print_console_poll_status(unsigned long now)
   Serial.print(F("Status: ms="));
   Serial.print(now);
   Serial.print(F(" screen="));
-  Serial.print(static_cast<int>(screen));
+  Serial.print(static_cast<int>(amp_runtime.screen()));
   Serial.print(F(" progress="));
   Serial.print(progress);
   Serial.print(F(" touch="));
@@ -770,7 +763,7 @@ void setup() {
   setup_baudrate_items[3] = ui_setupBaud9600;
   setup_baudrate_ctrl.begin(setup_baudrate_items, COUNT_OF(setup_baudrate_items));
 
-  last_rcu=millis();
+  amp_runtime.mark_activity(millis());
   lv_disp_load_scr(ui_bootScreen);
   lv_timer_handler();
 
@@ -845,7 +838,7 @@ void serial_task()
         serial_transport_note_valid_packet();
         completed_packet = true;
         if (read_result.len == 30) {
-          last_rcu = millis();
+          amp_runtime.mark_activity(millis());
           spe_expert1k_queue_packet(read_result.packet, read_result.len);
         } else {
           process_packet(read_result.packet, read_result.len);
@@ -868,14 +861,14 @@ void serial_task()
 
 // Keep the amplifier remote-control stream alive if no status packets arrive.
   unsigned long now = millis();
-  if (amp_control_remote_updates_enabled() && now - last_rcu >= interval)
+  if (amp_control_remote_updates_enabled() && amp_runtime.should_send_keepalive(now, interval))
   {
     //Serial1.end();      // close serial port
     //delay(100);        //wait 100 millis
     //Serial1.begin(9600);
     amp_control_power_on();
     completed_packet = true;
-    last_rcu=now;
+    amp_runtime.note_keepalive(now);
     if (progress < 100) {
       progress++;
     }
@@ -930,9 +923,19 @@ void web_task()
   }
 }
 
-static void publish_amp_status_snapshot()
+static SpeExpert1kRuntimeBindings spe_runtime_bindings()
 {
-  spe_expert1k_publish_app_status(amp_status_valid, screen, last_status, web_cat_snapshot, web_cat_snapshot_until);
+  return {
+    &setup_options_ctrl,
+    &setup_ant_ctrl,
+    &setup_cat_ctrl,
+    &setup_yaesu_ctrl,
+    &setup_icom_ctrl,
+    &setup_tentec_ctrl,
+    &setup_baudrate_ctrl,
+    setup_ant_items,
+    COUNT_OF(setup_ant_items)
+  };
 }
 
 void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
@@ -955,108 +958,18 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
     }
   } else if (len_in == 30) {
     // Show status
-    amp_status_valid = true;
-    last_rcu=millis();
+    const unsigned long now = millis();
     LvglLock lock;
 
     // Any valid status packet means the amp serial link is alive.
-    if (screen == BootMessage) {
+    if (amp_runtime.screen() == BootMessage) {
 #if SPE_ENABLE_WIFI_SETUP
         wifi_setup_set_visible(false);
 #endif
         lv_disp_load_scr(ui_mainScreen);
     }
 
-    // Select current screen
-    // Receive_Screen=0x00,Operate_RX,Operate_TX,Cat_Screen,UnusedA,Data_Stored,Setup_Options,Set_Antenna,Set_Cat,Set_Yaesu,Set_Icom,Set_TenTec,
-    // Set_BaudRate,Manual_Tune,Backlight,UnusedB,UnusedC,Alarm_History,Shutdown
-    ExpertScreen scr = static_cast<ExpertScreen>(packet_in.display_ctx);
-    AmpStatusSnapshot packet_status = spe_expert1k_make_status_snapshot(true, scr, packet_in);
-    const unsigned long now = millis();
-    const bool cat_hold_expired = screen == Cat_Screen && scr != Cat_Screen && now >= web_cat_snapshot_until;
-
-    // Only update if the packet changed, or if a transient CAT screen has timed out.
-    if (memcmp(&last_status,&packet_in,sizeof last_status) || cat_hold_expired)
-    {
-      const bool holding_cat_screen = screen == Cat_Screen && scr != Cat_Screen && now < web_cat_snapshot_until;
-
-      if (!holding_cat_screen && (screen != scr || packet_in.flags != last_status.flags || cat_hold_expired)) {
-        if (scr == Cat_Screen) {
-          web_cat_snapshot = packet_in;
-          web_cat_snapshot_until = now + cat_display_hold_ms;
-        }
-
-        spe_expert1k_hide_status_screens();
-        spe_expert1k_show_screen(scr, packet_in, packet_status, setup_ant_items, COUNT_OF(setup_ant_items));
-        if (scr == Alarm_History) {
-          last_status.setup[0] = 0xff; // Make sure it updates.
-        }
-        screen = scr;
-        if (scr != Cat_Screen) {
-          web_cat_snapshot_until = 0;
-        }
-        // If screen has changed, last_status is now invalid;
-        memset(&last_status,0xff,sizeof last_status);
-      }
-
-      if (scr == Alarm_History && last_status.setup[0] != packet_in.setup[0]) 
-      {
-        spe_expert1k_update_alarm_history_screen(packet_in);
-      } 
-
-      if (memcmp(&last_status.setup,&packet_in.setup,sizeof last_status.setup)|| last_status.flags != packet_in.flags)
-      {
-        // Something has changed!
-        if (scr == Setup_Options) 
-        {
-          spe_expert1k_update_setup_options_screen(packet_in);
-          setup_options_ctrl.applySelection(packet_in.setup[1] & 0x0f);
-        }
-        else if (scr == Set_Antenna) 
-        {
-          const uint8_t index = spe_expert1k_update_antenna_setup_screen(
-            packet_in, setup_ant_items, COUNT_OF(setup_ant_items), setup_ant_ctrl.selected());
-          setup_ant_ctrl.applySelection(index);
-        }
-        else if (scr == Set_Cat) 
-        {
-          setup_cat_ctrl.applySelection(packet_in.setup[1]);
-        }
-        else if (scr == Set_Yaesu) 
-        {
-          setup_yaesu_ctrl.applySelection(packet_in.setup[1]);
-        }
-        else if (scr == Set_Icom) 
-        {
-          setup_icom_ctrl.applySelection(packet_in.setup[1]);
-        }
-        else if (scr == Set_TenTec) 
-        {
-          setup_tentec_ctrl.applySelection(packet_in.setup[1]);
-        }
-        else if (scr == Set_BaudRate) 
-        {
-          setup_baudrate_ctrl.applySelection(packet_in.setup[1]);
-        }
-        else if (scr == Manual_Tune)
-        {
-          spe_expert1k_update_manual_tune_screen(packet_in);
-        }
-        else if (scr == Backlight)
-        {
-          // Update ManualTune contents
-          lv_bar_set_value(ui_backlightLevel, packet_in.setup[1], LV_ANIM_ON);
-        }
-      }
-      // No point updating any other ui elements unless they have actually changed since the last update.
-
-      // Standby/Operate screen data
-
-      if (scr == Operate_RX || scr == Operate_TX || (((packet_in.flags >> 2) & 0x01) != 0 && scr == Receive_Screen)) {
-        spe_expert1k_configure_transmit_meters(packet_status);
-      }
-    
-      spe_expert1k_update_status_values(last_status, packet_in, packet_status);
+    amp_runtime.process_status_packet(packet_in, spe_runtime_bindings(), now);
 
 #if SPE_VERBOSE_PACKET_LOG
       {
@@ -1075,9 +988,6 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
         Serial.println(float(packet_in.current)/10);
       }
 #endif
-      memcpy(&last_status,&packet_in,sizeof last_status);
-      publish_amp_status_snapshot();
-    }
   }
 }
 
