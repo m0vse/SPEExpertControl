@@ -44,10 +44,17 @@ static bool pending_save_on_success = false;
 static bool wifi_ui_dirty = false;
 static bool wifi_begin_pending = false;
 static bool wifi_hide_requested = false;
+static bool wifi_scan_requested = false;
+static bool wifi_scan_running = false;
+static bool wifi_scan_result_pending = false;
+static int wifi_scan_result = 0;
+static int wifi_scan_count = 0;
 static unsigned long wifi_connect_started = 0;
 static unsigned long wifi_next_reconnect = WIFI_AUTOCONNECT_DELAY_MS;
 static char wifi_status_text[96];
 static char wifi_startup_text[96];
+static char wifi_scan_ssids[MAX_WIFI_NETWORKS][MAX_WIFI_SSID_LEN + 1];
+static long wifi_scan_rssi[MAX_WIFI_NETWORKS];
 static rtos::Mutex wifi_state_mutex;
 static lv_obj_t *wifi_panel = NULL;
 static lv_obj_t *wifi_dropdown = NULL;
@@ -71,6 +78,7 @@ static void wifi_connect_to(const char *ssid, const char *password, bool save_on
 static void wifi_connect_saved(void);
 static void wifi_set_status_text(const char *status_text, const char *startup_text);
 static void wifi_apply_ui_updates(void);
+static void wifi_apply_scan_results(void);
 
 class WifiStateLock {
 public:
@@ -156,64 +164,28 @@ void wifi_setup_create(void) {
 }
 
 void wifi_setup_scan_networks(void) {
-    wifi_network_count = 0;
-    wifi_dropdown_options[0] = '\0';
-
-    WifiStackLock lock;
-
-    if (WiFi.status() == WL_NO_MODULE) {
-        Serial.println("Communication with WiFi module failed!");
-        {
-            WifiStateLock state_lock;
-            wifi_stack_available = false;
-            wifi_setup_active = false;
-            wifi_connecting = false;
+    bool already_running = false;
+    {
+        WifiStateLock state_lock;
+        if (wifi_scan_running || wifi_scan_requested) {
+            already_running = true;
+        } else {
+            wifi_scan_requested = true;
+            wifi_scan_result_pending = false;
+            wifi_network_count = 0;
+            wifi_dropdown_options[0] = '\0';
         }
-        lv_label_set_text(wifi_status_label, "WiFi firmware unavailable. Amplifier control will continue.");
-        lv_dropdown_set_options(wifi_dropdown, "WiFi unavailable");
+    }
+
+    if (already_running) {
+        wifi_set_status_text("WiFi scan already running...", "Scanning WiFi networks");
         return;
     }
 
-    lv_label_set_text(ui_startupMessage, "Scanning WiFi networks");
-    lv_label_set_text(wifi_status_label, "Scanning...");
-    lv_timer_handler();
-
-    int networks = WiFi.scanNetworks();
-    Serial.print("WiFi networks found: ");
-    Serial.println(networks);
-
-    if (networks <= 0) {
-        if (networks < 0) {
-            WifiStateLock state_lock;
-            wifi_stack_available = false;
-        }
-        lv_dropdown_set_options(wifi_dropdown, "No networks found");
-        lv_label_set_text(wifi_status_label, networks < 0 ? "WiFi scan failed. Amplifier control will continue." : "No networks found. Check antenna/range or search again.");
-        return;
+    if (wifi_dropdown) {
+        lv_dropdown_set_options(wifi_dropdown, "Scanning...");
     }
-
-    int count = networks;
-    if (count > MAX_WIFI_NETWORKS) count = MAX_WIFI_NETWORKS;
-    for (int i = 0; i < count; ++i) {
-        String ssid = WiFi.SSID(i);
-        ssid.toCharArray(wifi_ssids[i], MAX_WIFI_SSID_LEN + 1);
-
-        char line[MAX_WIFI_SSID_LEN + 18];
-        snprintf(line, sizeof(line), "%s (%ld dBm)", wifi_ssids[i], WiFi.RSSI(i));
-        if (i > 0) strncat(wifi_dropdown_options, "\n", sizeof(wifi_dropdown_options) - strlen(wifi_dropdown_options) - 1);
-        strncat(wifi_dropdown_options, line, sizeof(wifi_dropdown_options) - strlen(wifi_dropdown_options) - 1);
-
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(wifi_ssids[i]);
-        Serial.print(" RSSI ");
-        Serial.println(WiFi.RSSI(i));
-    }
-
-    wifi_network_count = count;
-    lv_dropdown_set_options(wifi_dropdown, wifi_dropdown_options);
-    lv_label_set_text(wifi_status_label, "Select a network, enter password, then connect.");
-    lv_label_set_text(ui_startupMessage, "WiFi setup ready");
+    wifi_set_status_text("Scanning...", "Scanning WiFi networks");
 }
 
 void wifi_setup_service(void) {
@@ -222,6 +194,7 @@ void wifi_setup_service(void) {
     unsigned long connect_started = 0;
 
     wifi_apply_ui_updates();
+    wifi_apply_scan_results();
     {
         WifiStateLock state_lock;
         hide_requested = wifi_hide_requested;
@@ -248,6 +221,7 @@ void wifi_setup_connection_service(void) {
     bool connected = false;
     bool connecting = false;
     bool saved_valid = false;
+    bool scan_requested = false;
     bool save_on_success = false;
     unsigned long connect_started = 0;
     unsigned long next_reconnect = 0;
@@ -265,8 +239,14 @@ void wifi_setup_connection_service(void) {
         connected = wifi_connected;
         connecting = wifi_connecting;
         saved_valid = saved_credentials_valid;
+        scan_requested = wifi_scan_requested;
         connect_started = wifi_connect_started;
         next_reconnect = wifi_next_reconnect;
+        if (scan_requested) {
+            wifi_scan_requested = false;
+            wifi_scan_running = true;
+            wifi_scan_result_pending = false;
+        }
         if (begin_pending) {
             wifi_begin_pending = false;
             save_on_success = pending_save_on_success;
@@ -275,6 +255,64 @@ void wifi_setup_connection_service(void) {
             strncpy(password, pending_password, sizeof(password) - 1);
             password[sizeof(password) - 1] = '\0';
         }
+    }
+
+    if (scan_requested) {
+        int networks = WL_IDLE_STATUS;
+        int count = 0;
+        char scanned_ssids[MAX_WIFI_NETWORKS][MAX_WIFI_SSID_LEN + 1];
+        long scanned_rssi[MAX_WIFI_NETWORKS];
+
+        memset(scanned_ssids, 0, sizeof(scanned_ssids));
+        memset(scanned_rssi, 0, sizeof(scanned_rssi));
+
+        {
+            WifiStackLock lock;
+            if (WiFi.status() == WL_NO_MODULE) {
+                networks = WL_NO_MODULE;
+            } else {
+                networks = WiFi.scanNetworks();
+                if (networks > 0) {
+                    count = networks > MAX_WIFI_NETWORKS ? MAX_WIFI_NETWORKS : networks;
+                    for (int i = 0; i < count; ++i) {
+                        String ssid_text = WiFi.SSID(i);
+                        ssid_text.toCharArray(scanned_ssids[i], MAX_WIFI_SSID_LEN + 1);
+                        scanned_rssi[i] = WiFi.RSSI(i);
+                    }
+                }
+            }
+        }
+
+        Serial.print("WiFi networks found: ");
+        Serial.println(networks);
+        for (int i = 0; i < count; ++i) {
+            Serial.print(i);
+            Serial.print(": ");
+            Serial.print(scanned_ssids[i]);
+            Serial.print(" RSSI ");
+            Serial.println(scanned_rssi[i]);
+        }
+
+        {
+            WifiStateLock state_lock;
+            if (networks == WL_NO_MODULE || networks < 0) {
+                wifi_stack_available = false;
+                if (networks == WL_NO_MODULE) {
+                    wifi_setup_active = false;
+                    wifi_connecting = false;
+                }
+            }
+            wifi_scan_result = networks;
+            wifi_scan_count = count;
+            for (int i = 0; i < count; ++i) {
+                strncpy(wifi_scan_ssids[i], scanned_ssids[i], sizeof(wifi_scan_ssids[i]) - 1);
+                wifi_scan_ssids[i][sizeof(wifi_scan_ssids[i]) - 1] = '\0';
+                wifi_scan_rssi[i] = scanned_rssi[i];
+            }
+            wifi_scan_running = false;
+            wifi_scan_result_pending = true;
+        }
+        return;
     }
 
     if (!stack_available || skipped) return;
@@ -815,4 +853,78 @@ static void wifi_apply_ui_updates(void) {
     if (startup_text[0]) {
         lv_label_set_text(ui_startupMessage, startup_text);
     }
+}
+
+static void wifi_apply_scan_results(void) {
+    int result = 0;
+    int count = 0;
+    char scanned_ssids[MAX_WIFI_NETWORKS][MAX_WIFI_SSID_LEN + 1];
+    long scanned_rssi[MAX_WIFI_NETWORKS];
+    bool pending = false;
+
+    memset(scanned_ssids, 0, sizeof(scanned_ssids));
+    memset(scanned_rssi, 0, sizeof(scanned_rssi));
+
+    {
+        WifiStateLock state_lock;
+        pending = wifi_scan_result_pending;
+        if (pending) {
+            result = wifi_scan_result;
+            count = wifi_scan_count;
+            for (int i = 0; i < count; ++i) {
+                strncpy(scanned_ssids[i], wifi_scan_ssids[i], sizeof(scanned_ssids[i]) - 1);
+                scanned_ssids[i][sizeof(scanned_ssids[i]) - 1] = '\0';
+                scanned_rssi[i] = wifi_scan_rssi[i];
+            }
+            wifi_scan_result_pending = false;
+        }
+    }
+
+    if (!pending) {
+        return;
+    }
+
+    wifi_network_count = 0;
+    wifi_dropdown_options[0] = '\0';
+
+    if (result == WL_NO_MODULE) {
+        if (wifi_dropdown) {
+            lv_dropdown_set_options(wifi_dropdown, "WiFi unavailable");
+        }
+        if (wifi_status_label) {
+            lv_label_set_text(wifi_status_label, "WiFi firmware unavailable. Amplifier control will continue.");
+        }
+        return;
+    }
+
+    if (result <= 0 || count <= 0) {
+        if (wifi_dropdown) {
+            lv_dropdown_set_options(wifi_dropdown, "No networks found");
+        }
+        if (wifi_status_label) {
+            lv_label_set_text(wifi_status_label, result < 0 ? "WiFi scan failed. Amplifier control will continue." : "No networks found. Check antenna/range or search again.");
+        }
+        return;
+    }
+
+    for (int i = 0; i < count; ++i) {
+        strncpy(wifi_ssids[i], scanned_ssids[i], sizeof(wifi_ssids[i]) - 1);
+        wifi_ssids[i][sizeof(wifi_ssids[i]) - 1] = '\0';
+
+        char line[MAX_WIFI_SSID_LEN + 18];
+        snprintf(line, sizeof(line), "%s (%ld dBm)", wifi_ssids[i], scanned_rssi[i]);
+        if (i > 0) {
+            strncat(wifi_dropdown_options, "\n", sizeof(wifi_dropdown_options) - strlen(wifi_dropdown_options) - 1);
+        }
+        strncat(wifi_dropdown_options, line, sizeof(wifi_dropdown_options) - strlen(wifi_dropdown_options) - 1);
+    }
+
+    wifi_network_count = count;
+    if (wifi_dropdown) {
+        lv_dropdown_set_options(wifi_dropdown, wifi_dropdown_options);
+    }
+    if (wifi_status_label) {
+        lv_label_set_text(wifi_status_label, "Select a network, enter password, then connect.");
+    }
+    lv_label_set_text(ui_startupMessage, "WiFi setup ready");
 }

@@ -13,7 +13,7 @@
 void wifi_setup_create(void);
 
 /**
- * Run a blocking WiFi scan and update the popup network list.
+ * Queue a WiFi scan and update the popup network list when the result is ready.
  */
 void wifi_setup_scan_networks(void);
 
