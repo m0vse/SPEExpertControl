@@ -40,12 +40,12 @@ public:
   bool power_on() override;
   bool remote_updates_enabled() const override;
   void process_next_queued_command() override;
+  void mark_activity(unsigned long now) override;
+  bool should_send_keepalive(unsigned long now, unsigned long interval_ms) const override;
+  void note_keepalive(unsigned long now) override;
 
   ExpertScreen screen() const;
   const Expert_Packet &last_status() const;
-  void mark_activity(unsigned long now);
-  bool should_send_keepalive(unsigned long now, unsigned long interval_ms) const;
-  void note_keepalive(unsigned long now);
   void process_status_packet(const Expert_Packet &packet,
                              const SpeExpert1kRuntimeBindings &bindings,
                              unsigned long now);

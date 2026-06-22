@@ -25,4 +25,7 @@ public:
   virtual bool power_on() = 0;
   virtual bool remote_updates_enabled() const = 0;
   virtual void process_next_queued_command() = 0;
+  virtual void mark_activity(unsigned long now) = 0;
+  virtual bool should_send_keepalive(unsigned long now, unsigned long interval_ms) const = 0;
+  virtual void note_keepalive(unsigned long now) = 0;
 };

@@ -19,6 +19,8 @@
 #include "lvgl.h"
 #include <ui.h>
 #include "amp_dtr.h"
+#include "models/amplifier_runtime.h"
+#include "models/amplifier_runtime_manager.h"
 #include "models/spe_expert1k/expertpackets.h"
 #include "models/spe_expert1k/lcd_renderer.h"
 #include "models/spe_expert1k/menuitems.h"
@@ -99,7 +101,6 @@ static lv_obj_t *setup_baudrate_items[4];
 const unsigned long interval = 1000;
 bool touch_ready = false;
 int transformed_touch_devices = 0;
-static SpeExpert1kRuntime amp_runtime;
 static rtos::Mutex lvgl_mutex;
 static rtos::Mutex debug_serial_mutex;
 static rtos::Thread ui_thread(osPriorityNormal, 8192, nullptr, "ui");
@@ -331,14 +332,15 @@ static void print_amp_status()
   Serial.print(F("Amp status valid="));
   Serial.println(snapshot.valid ? F("yes") : F("no"));
   Serial.print(F("model="));
-  Serial.println(amp_model_label(amp_runtime.model_id()));
+  Serial.println(amp_model_label(amplifier_runtime_active_model_id()));
   Serial.print(F("screen="));
   Serial.print(status.screen_id);
   Serial.print(F(" ("));
   Serial.print(status.screen_name);
   Serial.println(F(")"));
   Serial.print(F("last_rcu_ms="));
-  Serial.println(amp_runtime.last_activity_ms());
+  AmplifierRuntime *runtime = amplifier_runtime_active();
+  Serial.println(runtime ? runtime->last_activity_ms() : 0);
   Serial.print(F("dtr_pin=D"));
   Serial.print(amp_dtr_pin());
   Serial.print(F(" asserted="));
@@ -385,7 +387,7 @@ static void print_controller_status()
   Serial.print(F("Controller ms="));
   Serial.print(millis());
   Serial.print(F(" model="));
-  Serial.print(amp_model_key(amp_runtime.model_id()));
+  Serial.print(amp_model_key(amplifier_runtime_active_model_id()));
   Serial.print(F(" progress="));
   Serial.print(progress);
   Serial.print(F(" touch="));
@@ -534,7 +536,7 @@ static void print_amp_model_config()
 
   DebugSerialLock debug_lock;
   Serial.print(F("Active amplifier model: "));
-  Serial.println(amp_model_label(amp_runtime.model_id()));
+  Serial.println(amp_model_label(amplifier_runtime_active_model_id()));
   Serial.print(F("Saved amplifier model: "));
   Serial.println(amp_model_label(app_config_amp_model()));
   Serial.println(F("Known models:"));
@@ -816,7 +818,8 @@ static void print_console_poll_status(unsigned long now)
   Serial.print(F("Status: ms="));
   Serial.print(now);
   Serial.print(F(" screen="));
-  Serial.print(static_cast<int>(amp_runtime.screen()));
+  AmplifierRuntime *runtime = amplifier_runtime_active();
+  Serial.print(runtime ? runtime->screen_id() : 0);
   Serial.print(F(" progress="));
   Serial.print(progress);
   Serial.print(F(" touch="));
@@ -840,7 +843,6 @@ void setup() {
   boot_led_set(LEDG, false);
   boot_led_set(LEDB, false);
   amp_dtr_begin();
-  amp_control_bind_runtime(&amp_runtime);
 
   while(!Serial && millis()<4000) {
     delay(10);
@@ -859,6 +861,10 @@ void setup() {
 
 #if SPE_BRINGUP_LEVEL >= 1
   app_config_load();
+  if (!amplifier_runtime_select(app_config_amp_model())) {
+    amplifier_runtime_select(AmpModelId::SpeExpert1k);
+  }
+  amp_control_bind_runtime(amplifier_runtime_active());
   giga_lvgl_display_set_flipped(app_config_display_flipped());
   boot_stage(1, F("display begin"));
   int display_status = giga_lvgl_display_begin();
@@ -983,7 +989,9 @@ void setup() {
   setup_baudrate_items[3] = ui_setupBaud9600;
   setup_baudrate_ctrl.begin(setup_baudrate_items, COUNT_OF(setup_baudrate_items));
 
-  amp_runtime.mark_activity(millis());
+  if (AmplifierRuntime *runtime = amplifier_runtime_active()) {
+    runtime->mark_activity(millis());
+  }
   lv_disp_load_scr(ui_bootScreen);
   lv_timer_handler();
 
@@ -1040,78 +1048,77 @@ void serial_task()
   uint32_t last_run_ms = millis();
   bool last_usb_console_active = false;
   while (true) {
-  const bool usb_console_active = spe_expert1k_usb_console_active();
-  if (usb_console_active) {
-    if (!last_usb_console_active) {
-      serial_console_reset_line();
-      DebugSerialLock debug_lock;
-      Serial.println(F("Console ready. Type 'help' for commands."));
+    const bool usb_console_active = spe_expert1k_usb_console_active();
+    if (usb_console_active) {
+      if (!last_usb_console_active) {
+        serial_console_reset_line();
+        DebugSerialLock debug_lock;
+        Serial.println(F("Console ready. Type 'help' for commands."));
+      }
+      last_usb_console_active = true;
+      serial_console_service(handle_console_command, print_console_poll_status);
+      rtos::ThisThread::sleep_for(10ms);
+      continue;
     }
-    last_usb_console_active = true;
-    serial_console_service(handle_console_command, print_console_poll_status);
-    rtos::ThisThread::sleep_for(10ms);
-    continue;
-  }
-  last_usb_console_active = false;
+    last_usb_console_active = false;
 
-  const uint32_t now_ms = millis();
-  serial_transport_note_task_gap(now_ms - last_run_ms);
-  last_run_ms = now_ms;
-  uint32_t drained_bytes = 0;
-  bool completed_packet = false;
+    const uint32_t now_ms = millis();
+    serial_transport_note_task_gap(now_ms - last_run_ms);
+    last_run_ms = now_ms;
+    uint32_t drained_bytes = 0;
+    bool completed_packet = false;
 
-  // Check for serial data
-  while (true) {
-    SpeExpert1kReadResult read_result;
-    if (!spe_expert1k_serial_read(read_result)) {
-      break;
-    }
-    ++drained_bytes;
-
-    switch (read_result.result) {
-      case ExpertPacketParser::Result::PacketReady:
-        serial_transport_note_valid_packet();
-        completed_packet = true;
-        if (read_result.len == 30) {
-          amp_runtime.mark_activity(millis());
-          spe_expert1k_queue_packet(read_result.packet, read_result.len);
-        } else {
-          process_packet(read_result.packet, read_result.len);
-        }
-        break;
-      case ExpertPacketParser::Result::InvalidChecksum:
-      {
-        serial_transport_note_invalid_checksum(
-          read_result.invalid_len,
-          read_result.invalid_expected_checksum,
-          read_result.invalid_received_checksum,
-          read_result.last_available);
+    // Check for serial data
+    while (true) {
+      SpeExpert1kReadResult read_result;
+      if (!spe_expert1k_serial_read(read_result)) {
         break;
       }
-      case ExpertPacketParser::Result::None:
-        break;
-    }
-  }  
-  serial_transport_note_drain_burst(drained_bytes);
+      ++drained_bytes;
 
-// Keep the amplifier remote-control stream alive if no status packets arrive.
-  unsigned long now = millis();
-  if (amp_control_remote_updates_enabled() && amp_runtime.should_send_keepalive(now, interval))
-  {
-    //Serial1.end();      // close serial port
-    //delay(100);        //wait 100 millis
-    //Serial1.begin(9600);
-    amp_control_power_on();
-    completed_packet = true;
-    amp_runtime.note_keepalive(now);
-    if (progress < 100) {
-      progress++;
+      switch (read_result.result) {
+        case ExpertPacketParser::Result::PacketReady:
+          serial_transport_note_valid_packet();
+          completed_packet = true;
+          if (read_result.len == 30) {
+            if (AmplifierRuntime *runtime = amplifier_runtime_active()) {
+              runtime->mark_activity(millis());
+            }
+            spe_expert1k_queue_packet(read_result.packet, read_result.len);
+          } else {
+            process_packet(read_result.packet, read_result.len);
+          }
+          break;
+        case ExpertPacketParser::Result::InvalidChecksum:
+        {
+          serial_transport_note_invalid_checksum(
+            read_result.invalid_len,
+            read_result.invalid_expected_checksum,
+            read_result.invalid_received_checksum,
+            read_result.last_available);
+          break;
+        }
+        case ExpertPacketParser::Result::None:
+          break;
+      }
     }
-    {
-      LvglLock lock;
-      lv_bar_set_value(ui_startupBar, progress, LV_ANIM_OFF);
+    serial_transport_note_drain_burst(drained_bytes);
+
+    // Keep the amplifier remote-control stream alive if no status packets arrive.
+    unsigned long now = millis();
+    AmplifierRuntime *runtime = amplifier_runtime_active();
+    if (amp_control_remote_updates_enabled() && runtime && runtime->should_send_keepalive(now, interval)) {
+      amp_control_power_on();
+      completed_packet = true;
+      runtime->note_keepalive(now);
+      if (progress < 100) {
+        progress++;
+      }
+      {
+        LvglLock lock;
+        lv_bar_set_value(ui_startupBar, progress, LV_ANIM_OFF);
+      }
     }
-  }
 
     if (completed_packet) {
       amp_control_process_next_queued_command();
@@ -1199,14 +1206,19 @@ void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
     LvglLock lock;
 
     // Any valid status packet means the amp serial link is alive.
-    if (amp_runtime.screen() == BootMessage) {
+    SpeExpert1kRuntime *runtime = amplifier_runtime_spe_expert1k();
+    if (!runtime) {
+      return;
+    }
+
+    if (runtime->screen() == BootMessage) {
 #if SPE_ENABLE_WIFI_SETUP
         wifi_setup_set_visible(false);
 #endif
         lv_disp_load_scr(ui_mainScreen);
     }
 
-    amp_runtime.process_status_packet(packet_in, spe_runtime_bindings(), now);
+    runtime->process_status_packet(packet_in, spe_runtime_bindings(), now);
 
 #if SPE_VERBOSE_PACKET_LOG
       {
