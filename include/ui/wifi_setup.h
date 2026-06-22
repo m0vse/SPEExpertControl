@@ -36,6 +36,18 @@ void wifi_setup_connection_service(void);
 void wifi_setup_set_visible(bool visible);
 
 /**
+ * Refresh the LCD sleep timeout field from saved controller configuration.
+ *
+ * Call this while holding the LVGL lock when invoked outside the UI task.
+ */
+void wifi_setup_refresh_screensaver_timeout(void);
+
+/**
+ * @return true when the hidden setup popup is currently visible.
+ */
+bool wifi_setup_is_visible(void);
+
+/**
  * @return true when the WiFi stack currently reports WL_CONNECTED.
  */
 bool wifi_setup_is_connected(void);

@@ -59,10 +59,11 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 - FreeRTOS split between UI and amplifier serial work
 - Mutex handling around LVGL, amplifier serial, and debug serial access
 - Saved WiFi credentials stored on the Giga QSPI filesystem
-- Hidden setup popup opened from the top-left of the display for WiFi and display orientation
+- Hidden setup popup opened from the top-left of the display for WiFi, display orientation, serial, web, and LCD sleep settings
 - Background WiFi reconnect using saved credentials
 - Serial console commands for WiFi, amplifier status, scans, and diagnostics
 - DTR power-on output for waking the amplifier when it is switched off
+- Configurable LCD sleep timeout using the Giga Display Shield backlight gate on `D74`/`PB12`
 - Web UI that mirrors the LCD screens and sends the same amplifier button commands
 - Separate PlatformIO environment for refreshing the Arduino Giga WiFi firmware
 
@@ -151,6 +152,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | `amp-serial` | `ampserial` | Print the active and saved amplifier serial transport. Use `amp-serial uart1`, `uart2`, `uart3`, `uart4`, or `usb` to save a new transport and reboot. |
 | `amp-baud` | `ampbaud` | Print the saved amplifier baud rate. Use `amp-baud 1200`, `2400`, `4800`, `9600`, `19200`, `38400`, `57600`, or `115200` to save a new baud rate and reboot. |
 | `web-port` | `webport` | Print the saved HTTP server port. Use `web-port <1-65535>` to save a new port and reboot. |
+| `screensaver` | `screen-saver` | Print the saved LCD sleep timeout and current backlight state. Use `screensaver off`, `screensaver wake`, or `screensaver <minutes>` to change it. `0` disables LCD sleep. |
 | `exit` | `passthrough` | In USB amplifier mode, close the debug console and return USB `Serial` to amplifier communications. In normal UART mode, this reports that the console remains active. |
 | `setup` | `wifi-popup` | Open the hidden controller setup popup on the LCD. This is the same panel opened by tapping the top-left of the display. |
 | `wifi-saved` | - | Print whether saved WiFi credentials exist, the saved SSID, and password length. The password itself is not printed. |
@@ -197,11 +199,17 @@ The `stats` command reports Mbed heap, stack, CPU, and RTOS thread data. Thread 
 
 ## Setup And WiFi
 
-WiFi, display orientation, amplifier serial transport, and the web server port are configured from a hidden setup popup on the LCD. Tap the top-left of the display or run the serial console `setup` command to open it.
+WiFi, display orientation, amplifier serial transport, web server port, and LCD sleep timeout are configured from a hidden setup popup on the LCD. Tap the top-left of the display or run the serial console `setup` command to open it.
 
-Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option, amplifier serial transport and baud controls, and a numeric web port field. Changing the transport, baud, or web port saves the setting and reboots immediately.
+Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option, amplifier serial transport and baud controls, a numeric web port field, and a numeric LCD sleep timeout in minutes. Changing the transport, baud, or web port saves the setting and reboots immediately. Changing the LCD sleep timeout applies immediately; `0` disables it.
 
 Credentials are stored on the Giga QSPI filesystem. On restart, the firmware loads saved credentials and attempts to reconnect in the background. Failed attempts time out and are retried periodically without blocking the amplifier UI or serial control.
+
+## LCD Sleep
+
+The controller can switch the Giga Display Shield backlight off after a period of local touch inactivity. The default timeout is 30 minutes. The first touch after the backlight is off only wakes the display; it is deliberately not passed to the LVGL button layer, so it cannot accidentally send an amplifier command.
+
+The backlight gate uses Arduino Giga `D74`, which maps to `PB12` on the display connector. The firmware controls it through the official `GigaDisplayBacklight` helper from `Arduino_GigaDisplay.h`, while the framebuffer path remains on `Arduino_GigaDisplay_GFX`.
 
 ## Web UI
 

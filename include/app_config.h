@@ -15,6 +15,8 @@ static const size_t APP_CONFIG_WIFI_SSID_LEN = 32;
 static const size_t APP_CONFIG_WIFI_PASSWORD_LEN = 64;
 static const uint32_t APP_CONFIG_DEFAULT_AMP_BAUD = 9600;
 static const uint16_t APP_CONFIG_DEFAULT_WEB_PORT = 80;
+static const uint16_t APP_CONFIG_DEFAULT_SCREENSAVER_TIMEOUT_MIN = 30;
+static const uint16_t APP_CONFIG_MAX_SCREENSAVER_TIMEOUT_MIN = 999;
 
 enum class AppAmpSerialPort : uint8_t {
     Uart1 = 0,
@@ -32,6 +34,7 @@ struct AppConfig {
     AppAmpSerialPort amp_serial_port = AppAmpSerialPort::Uart1;
     uint32_t amp_baud = APP_CONFIG_DEFAULT_AMP_BAUD;
     uint16_t web_port = APP_CONFIG_DEFAULT_WEB_PORT;
+    uint16_t screensaver_timeout_min = APP_CONFIG_DEFAULT_SCREENSAVER_TIMEOUT_MIN;
 };
 
 bool app_config_load(void);
@@ -51,5 +54,8 @@ bool app_config_set_amp_baud(uint32_t baud);
 uint16_t app_config_web_port(void);
 bool app_config_is_valid_web_port(uint32_t port);
 bool app_config_set_web_port(uint16_t port);
+uint16_t app_config_screensaver_timeout_min(void);
+bool app_config_is_valid_screensaver_timeout_min(uint32_t timeout_min);
+bool app_config_set_screensaver_timeout_min(uint16_t timeout_min);
 bool app_config_set_wifi_credentials(const char *ssid, const char *password);
 bool app_config_clear_wifi_credentials(void);

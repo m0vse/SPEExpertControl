@@ -10,6 +10,7 @@
 #include "app_config.h"
 #include "display/lvgl_giga_display.h"
 #include "network/wifi_lock.h"
+#include "ui/screensaver.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <rtos.h>
@@ -66,6 +67,7 @@ static lv_obj_t *display_flip_label = NULL;
 static lv_obj_t *amp_serial_dropdown = NULL;
 static lv_obj_t *amp_baud_dropdown = NULL;
 static lv_obj_t *web_port_textarea = NULL;
+static lv_obj_t *screensaver_textarea = NULL;
 static lv_obj_t *wifi_keyboard = NULL;
 static lv_obj_t *wifi_status_label = NULL;
 static lv_obj_t *wifi_hotspot = NULL;
@@ -78,6 +80,7 @@ static void display_flip_event_cb(lv_event_t *e);
 static void amp_serial_event_cb(lv_event_t *e);
 static void amp_baud_event_cb(lv_event_t *e);
 static void web_port_textarea_event_cb(lv_event_t *e);
+static void screensaver_textarea_event_cb(lv_event_t *e);
 static void wifi_hotspot_event_cb(lv_event_t *e);
 static void connect_selected_wifi(void);
 static void wifi_keyboard_set_visible(bool visible);
@@ -113,6 +116,12 @@ static void web_port_textarea_set_port(uint16_t port) {
     char text[6];
     snprintf(text, sizeof(text), "%u", port);
     lv_textarea_set_text(web_port_textarea, text);
+}
+
+static void screensaver_textarea_set_timeout(uint16_t timeout_min) {
+    char text[6];
+    snprintf(text, sizeof(text), "%u", timeout_min);
+    lv_textarea_set_text(screensaver_textarea, text);
 }
 
 static lv_obj_t *create_setup_label(lv_obj_t *parent, const char *text, int x, int y, int width) {
@@ -178,9 +187,9 @@ void wifi_setup_create(void) {
     lv_dropdown_set_selected(amp_baud_dropdown, amp_baud_to_index(app_config_amp_baud()));
     lv_obj_add_event_cb(amp_baud_dropdown, amp_baud_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    create_setup_label(wifi_panel, "Web port", 475, 26, 105);
+    create_setup_label(wifi_panel, "Web port", 475, 26, 95);
     web_port_textarea = lv_textarea_create(wifi_panel);
-    lv_obj_set_size(web_port_textarea, 105, 42);
+    lv_obj_set_size(web_port_textarea, 95, 42);
     lv_obj_set_pos(web_port_textarea, 475, 46);
     lv_textarea_set_one_line(web_port_textarea, true);
     lv_textarea_set_max_length(web_port_textarea, 5);
@@ -190,6 +199,19 @@ void wifi_setup_create(void) {
     lv_obj_add_event_cb(web_port_textarea, web_port_textarea_event_cb, LV_EVENT_FOCUSED, NULL);
     lv_obj_add_event_cb(web_port_textarea, web_port_textarea_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(web_port_textarea, web_port_textarea_event_cb, LV_EVENT_CANCEL, NULL);
+
+    create_setup_label(wifi_panel, "Sleep min", 590, 26, 105);
+    screensaver_textarea = lv_textarea_create(wifi_panel);
+    lv_obj_set_size(screensaver_textarea, 105, 42);
+    lv_obj_set_pos(screensaver_textarea, 590, 46);
+    lv_textarea_set_one_line(screensaver_textarea, true);
+    lv_textarea_set_max_length(screensaver_textarea, 3);
+    lv_textarea_set_accepted_chars(screensaver_textarea, "0123456789");
+    lv_textarea_set_placeholder_text(screensaver_textarea, "0");
+    screensaver_textarea_set_timeout(app_config_screensaver_timeout_min());
+    lv_obj_add_event_cb(screensaver_textarea, screensaver_textarea_event_cb, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(screensaver_textarea, screensaver_textarea_event_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(screensaver_textarea, screensaver_textarea_event_cb, LV_EVENT_CANCEL, NULL);
 
     create_setup_label(wifi_panel, "WiFi network", 0, 90, 430);
     wifi_dropdown = lv_dropdown_create(wifi_panel);
@@ -619,6 +641,7 @@ void wifi_setup_print_saved_credentials(void) {
 void wifi_setup_set_visible(bool visible) {
     if (!wifi_panel) return;
     if (visible) {
+        wifi_setup_refresh_screensaver_timeout();
         lv_obj_move_foreground(wifi_panel);
         if (wifi_hotspot) lv_obj_move_foreground(wifi_hotspot);
         lv_obj_remove_flag(wifi_panel, LV_OBJ_FLAG_HIDDEN);
@@ -626,6 +649,16 @@ void wifi_setup_set_visible(bool visible) {
         lv_obj_add_flag(wifi_panel, LV_OBJ_FLAG_HIDDEN);
         wifi_keyboard_set_visible(false);
     }
+}
+
+void wifi_setup_refresh_screensaver_timeout(void) {
+    if (screensaver_textarea && !lv_obj_has_state(screensaver_textarea, LV_STATE_FOCUSED)) {
+        screensaver_textarea_set_timeout(app_config_screensaver_timeout_min());
+    }
+}
+
+bool wifi_setup_is_visible(void) {
+    return wifi_panel && !lv_obj_has_flag(wifi_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void connect_selected_wifi(void) {
@@ -723,13 +756,57 @@ static void web_port_textarea_event_cb(lv_event_t *e) {
     reboot_after_config_change(message);
 }
 
+static void screensaver_textarea_event_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_FOCUSED) {
+        lv_keyboard_set_textarea(wifi_keyboard, screensaver_textarea);
+        lv_keyboard_set_mode(wifi_keyboard, LV_KEYBOARD_MODE_NUMBER);
+        wifi_keyboard_set_visible(true);
+        return;
+    }
+
+    if (code == LV_EVENT_CANCEL) {
+        screensaver_textarea_set_timeout(app_config_screensaver_timeout_min());
+        wifi_keyboard_set_visible(false);
+        return;
+    }
+
+    if (code != LV_EVENT_READY) {
+        return;
+    }
+
+    wifi_keyboard_set_visible(false);
+    const char *text = lv_textarea_get_text(screensaver_textarea);
+    const uint32_t timeout_min = strtoul(text ? text : "", nullptr, 10);
+    const uint16_t current = app_config_screensaver_timeout_min();
+
+    if (!app_config_is_valid_screensaver_timeout_min(timeout_min)) {
+        screensaver_textarea_set_timeout(current);
+        lv_label_set_text(wifi_status_label, "Sleep timeout must be 0-999 minutes.");
+        return;
+    }
+
+    if (!app_config_set_screensaver_timeout_min(static_cast<uint16_t>(timeout_min))) {
+        screensaver_textarea_set_timeout(current);
+        lv_label_set_text(wifi_status_label, "Sleep timeout changed, but saving failed.");
+        return;
+    }
+
+    screensaver_set_timeout_minutes(static_cast<uint16_t>(timeout_min));
+    if (timeout_min == 0) {
+        lv_label_set_text(wifi_status_label, "LCD sleep disabled.");
+    } else {
+        lv_label_set_text_fmt(wifi_status_label, "LCD sleep after %lu minutes.", static_cast<unsigned long>(timeout_min));
+    }
+}
+
 static void display_flip_event_cb(lv_event_t *e) {
     (void)e;
     const bool flipped = !app_config_display_flipped();
     giga_lvgl_display_set_flipped(flipped);
     const bool saved = app_config_set_display_flipped(flipped);
     if (display_flip_label) {
-        lv_label_set_text_fmt(display_flip_label, "Flip display: %s", flipped ? "On" : "Off");
+        lv_label_set_text_fmt(display_flip_label, "Flip: %s", flipped ? "On" : "Off");
         lv_obj_center(display_flip_label);
     }
     lv_label_set_text(wifi_status_label, saved ? "Display orientation updated." : "Display orientation changed, but saving failed.");

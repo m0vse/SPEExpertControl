@@ -8,6 +8,7 @@
 #include "display/lvgl_giga_touch.h"
 
 #include "display/lvgl_giga_display.h"
+#include "ui/screensaver.h"
 
 #include <lvgl.h>
 
@@ -32,6 +33,11 @@ static void transformed_touch_read(lv_indev_t *indev, lv_indev_data_t *data)
     const uint8_t contacts = touch ? touch->getTouchPoints(points) : 0;
 
     if (contacts > 0) {
+        if (!screensaver_note_touch(millis())) {
+            data->state = LV_INDEV_STATE_RELEASED;
+            return;
+        }
+
         const int16_t normal_x = clamp_coord(points[0].y, 0, kLogicalWidth - 1);
         const int16_t normal_y = clamp_coord((kLogicalHeight - 1) - points[0].x, 0, kLogicalHeight - 1);
         data->state = LV_INDEV_STATE_PRESSED;
@@ -43,6 +49,7 @@ static void transformed_touch_read(lv_indev_t *indev, lv_indev_data_t *data)
             data->point.y = normal_y;
         }
     } else {
+        screensaver_note_release();
         data->state = LV_INDEV_STATE_RELEASED;
     }
 }

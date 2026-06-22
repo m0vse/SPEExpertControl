@@ -31,6 +31,7 @@
 #include "models/spe_expert1k/serial_link.h"
 #include "serial/transport_stats.h"
 #include "ui/menu_control.h"
+#include "ui/screensaver.h"
 
 #if SPE_ENABLE_WEB_SERVER
 #include "network/control_server.h"
@@ -378,6 +379,7 @@ static void print_console_help()
   Serial.println(F("  dtr         Show amplifier DTR output state"));
   Serial.println(F("  amp-serial  Show or set amplifier serial transport"));
   Serial.println(F("  amp-baud    Show or set amplifier serial baud rate"));
+  Serial.println(F("  screensaver Show or set LCD blank timeout"));
   Serial.println(F("  exit        Return USB serial to amplifier comms"));
   Serial.println(F("  setup       Open controller setup popup on the display"));
   Serial.println(F("  wifi-saved  Show saved WiFi credential state"));
@@ -642,6 +644,10 @@ static void print_controller_status()
   Serial.print(F(" ("));
   Serial.print(status.screen_name);
   Serial.println(F(")"));
+  Serial.print(F("screensaver_timeout_min="));
+  Serial.print(screensaver_timeout_minutes());
+  Serial.print(F(" active="));
+  Serial.println(screensaver_is_active() ? F("yes") : F("no"));
 #if SPE_BRINGUP_LEVEL >= 5
   Serial.print(F("serial1_available="));
   AmplifierSerialSession *session = amplifier_session_active();
@@ -896,6 +902,56 @@ static void print_amp_baud_config()
   Serial.println(F("Supported: 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200"));
 }
 
+static void print_screensaver_config()
+{
+  DebugSerialLock debug_lock;
+  Serial.print(F("LCD screensaver timeout: "));
+  const uint16_t timeout_min = app_config_screensaver_timeout_min();
+  if (timeout_min == 0) {
+    Serial.println(F("off"));
+  } else {
+    Serial.print(timeout_min);
+    Serial.println(F(" minutes"));
+  }
+  Serial.print(F("Backlight: "));
+  Serial.println(screensaver_is_active() ? F("off") : F("on"));
+  Serial.println(F("Use 'screensaver off' or 'screensaver <minutes>' to change it."));
+}
+
+static void set_screensaver_config(uint32_t timeout_min)
+{
+  if (!app_config_is_valid_screensaver_timeout_min(timeout_min)) {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Unsupported screensaver timeout. Use 0-"));
+    Serial.print(APP_CONFIG_MAX_SCREENSAVER_TIMEOUT_MIN);
+    Serial.println(F(" minutes."));
+    return;
+  }
+
+  if (!app_config_set_screensaver_timeout_min(static_cast<uint16_t>(timeout_min))) {
+    DebugSerialLock debug_lock;
+    Serial.println(F("Failed to save screensaver timeout"));
+    return;
+  }
+
+  screensaver_set_timeout_minutes(static_cast<uint16_t>(timeout_min));
+#if SPE_ENABLE_WIFI_SETUP
+  {
+    LvglLock lock;
+    wifi_setup_refresh_screensaver_timeout();
+  }
+#endif
+
+  DebugSerialLock debug_lock;
+  if (timeout_min == 0) {
+    Serial.println(F("LCD screensaver disabled"));
+  } else {
+    Serial.print(F("LCD screensaver timeout saved as "));
+    Serial.print(timeout_min);
+    Serial.println(F(" minutes"));
+  }
+}
+
 static void set_amp_baud_config(uint32_t baud)
 {
   if (!app_config_is_valid_amp_baud(baud)) {
@@ -985,6 +1041,18 @@ static void handle_console_command(char *line)
     print_wifi_scan();
   } else if (strcmp(line, "stats") == 0 || strcmp(line, "mem") == 0) {
     print_runtime_stats();
+  } else if (strcmp(line, "screensaver") == 0 || strcmp(line, "screen-saver") == 0) {
+    print_screensaver_config();
+  } else if (strcmp(line, "screensaver off") == 0 || strcmp(line, "screen-saver off") == 0) {
+    set_screensaver_config(0);
+  } else if (strcmp(line, "screensaver wake") == 0 || strcmp(line, "screen-saver wake") == 0) {
+    screensaver_wake();
+    DebugSerialLock debug_lock;
+    Serial.println(F("LCD backlight awake"));
+  } else if (strncmp(line, "screensaver ", 12) == 0) {
+    set_screensaver_config(strtoul(line + 12, nullptr, 10));
+  } else if (strncmp(line, "screen-saver ", 13) == 0) {
+    set_screensaver_config(strtoul(line + 13, nullptr, 10));
   } else if (strcmp(line, "reboot") == 0 || strcmp(line, "reset") == 0) {
     reboot_controller();
   } else if (strcmp(line, "dfu") == 0 || strcmp(line, "bootloader") == 0) {
@@ -1118,6 +1186,7 @@ void setup() {
   boot_led_set(LEDB, false);
   amp_dtr_begin();
   dtr_auto_assert_after_ms = millis() + SPE_DTR_STARTUP_ASSERT_DELAY_MS;
+  screensaver_begin(app_config_screensaver_timeout_min());
 
   while(!Serial && millis()<4000) {
     delay(10);
@@ -1316,8 +1385,12 @@ void ui_task()
 
 #if SPE_ENABLE_WIFI_SETUP && SPE_BRINGUP_LEVEL >= 4
       wifi_setup_service();
+      if (wifi_setup_is_visible()) {
+        screensaver_note_activity();
+      }
 #endif
       update_generic_amp_lcd_state();
+      screensaver_service(millis());
     }
 #endif
 
@@ -1481,6 +1554,9 @@ static void handle_amp_session_ui_packet(const AmplifierSessionPacket &session_p
     }
 
     runtime->process_status_packet(packet_in, spe_runtime_bindings(), now);
+    if (packet_in.display_ctx >= Warning_V_Low_Half && packet_in.display_ctx <= Warning_Protection) {
+      screensaver_wake();
+    }
 
 #if SPE_VERBOSE_PACKET_LOG
       {
