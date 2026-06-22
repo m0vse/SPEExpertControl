@@ -10,6 +10,7 @@
 #include "app_status.h"
 #include "models/spe_expert1k/status_view.h"
 #include <stdio.h>
+#include <string.h>
 
 #define COUNT_OF_LOCAL(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -80,6 +81,17 @@ AmpStatusSnapshot spe_expert1k_make_status_snapshot(bool valid, ExpertScreen scr
     return snapshot;
 }
 
+static AppModelData spe_expert1k_make_model_data(ExpertScreen screen, const Expert_Packet &packet)
+{
+    AppModelData data;
+    data.model = AmpModelId::SpeExpert1k;
+    data.screen_id = static_cast<uint8_t>(screen);
+    data.screen_name = screen_name(screen);
+    data.size = sizeof(packet.setup) <= APP_MODEL_DATA_MAX ? sizeof(packet.setup) : APP_MODEL_DATA_MAX;
+    memcpy(data.bytes, packet.setup, data.size);
+    return data;
+}
+
 void spe_expert1k_publish_app_status(bool valid,
                                      ExpertScreen screen,
                                      const Expert_Packet &status,
@@ -88,13 +100,11 @@ void spe_expert1k_publish_app_status(bool valid,
 {
     AppStatusSnapshot snapshot;
     snapshot.valid = valid;
-    snapshot.screen = screen;
-    snapshot.status = status;
-    snapshot.web_cat_snapshot = web_cat_snapshot;
-    snapshot.web_cat_snapshot_until = web_cat_snapshot_until;
-    snapshot.amp = spe_expert1k_make_status_snapshot(snapshot.valid, snapshot.screen, snapshot.status);
-    snapshot.web_cat_amp = spe_expert1k_make_status_snapshot(snapshot.valid && snapshot.web_cat_snapshot_until != 0,
-                                                            Cat_Screen,
-                                                            snapshot.web_cat_snapshot);
+    snapshot.amp = spe_expert1k_make_status_snapshot(valid, screen, status);
+    snapshot.model_data = spe_expert1k_make_model_data(screen, status);
+    snapshot.transient_valid = valid && web_cat_snapshot_until != 0;
+    snapshot.transient_amp = spe_expert1k_make_status_snapshot(snapshot.transient_valid, Cat_Screen, web_cat_snapshot);
+    snapshot.transient_model_data = spe_expert1k_make_model_data(Cat_Screen, web_cat_snapshot);
+    snapshot.transient_until = web_cat_snapshot_until;
     app_status_publish(snapshot);
 }

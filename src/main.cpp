@@ -313,16 +313,15 @@ static void print_serial_status()
 static void print_amp_status()
 {
   const AppStatusSnapshot snapshot = app_status_snapshot();
-  const ExpertScreen status_screen = snapshot.screen;
   const AmpStatusSnapshot &status = snapshot.amp;
 
   DebugSerialLock debug_lock;
   Serial.print(F("Amp status valid="));
   Serial.println(snapshot.valid ? F("yes") : F("no"));
   Serial.print(F("screen="));
-  Serial.print(static_cast<int>(status_screen));
+  Serial.print(status.screen_id);
   Serial.print(F(" ("));
-  Serial.print(screen_name(status_screen));
+  Serial.print(status.screen_name);
   Serial.println(F(")"));
   Serial.print(F("last_rcu_ms="));
   Serial.println(amp_runtime.last_activity_ms());
@@ -366,7 +365,7 @@ static void print_amp_status()
 static void print_controller_status()
 {
   const AppStatusSnapshot snapshot = app_status_snapshot();
-  const ExpertScreen status_screen = snapshot.screen;
+  const AmpStatusSnapshot &status = snapshot.amp;
 
   DebugSerialLock debug_lock;
   Serial.print(F("Controller ms="));
@@ -378,9 +377,9 @@ static void print_controller_status()
   Serial.print(F(" indev="));
   Serial.print(transformed_touch_devices);
   Serial.print(F(" screen="));
-  Serial.print(static_cast<int>(status_screen));
+  Serial.print(status.screen_id);
   Serial.print(F(" ("));
-  Serial.print(screen_name(status_screen));
+  Serial.print(status.screen_name);
   Serial.println(F(")"));
 #if SPE_BRINGUP_LEVEL >= 5
   Serial.print(F("serial1_available="));

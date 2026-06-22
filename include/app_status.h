@@ -10,17 +10,25 @@
 #include <Arduino.h>
 #include <Print.h>
 #include "models/amplifier_model.h"
-#include "models/spe_expert1k/expertpackets.h"
-#include "models/spe_expert1k/protocol.h"
+
+static constexpr uint8_t APP_MODEL_DATA_MAX = 16;
+
+struct AppModelData {
+    AmpModelId model = AmpModelId::Unknown;
+    uint8_t screen_id = 0;
+    const char *screen_name = "unknown";
+    uint8_t bytes[APP_MODEL_DATA_MAX] = {};
+    uint8_t size = 0;
+};
 
 struct AppStatusSnapshot {
     bool valid = false;
-    ExpertScreen screen = BootMessage;
-    Expert_Packet status{};
-    Expert_Packet web_cat_snapshot{};
-    unsigned long web_cat_snapshot_until = 0;
     AmpStatusSnapshot amp{};
-    AmpStatusSnapshot web_cat_amp{};
+    AppModelData model_data{};
+    bool transient_valid = false;
+    AmpStatusSnapshot transient_amp{};
+    AppModelData transient_model_data{};
+    unsigned long transient_until = 0;
     uint32_t sequence = 0;
 };
 

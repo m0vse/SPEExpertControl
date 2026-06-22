@@ -47,20 +47,16 @@ AppStatusSnapshot app_status_snapshot(void)
 void app_status_print_json(Print &out)
 {
     AppStatusSnapshot snapshot = app_status_snapshot();
-    ExpertScreen current_screen = snapshot.screen;
-    const bool show_cat_snapshot = snapshot.valid && current_screen == Cat_Screen && snapshot.web_cat_snapshot_until != 0;
-    Expert_Packet status = show_cat_snapshot ? snapshot.web_cat_snapshot : snapshot.status;
-    AmpStatusSnapshot amp = show_cat_snapshot ? snapshot.web_cat_amp : snapshot.amp;
-    if (show_cat_snapshot) {
-        current_screen = Cat_Screen;
-    }
+    const bool show_transient = snapshot.valid && snapshot.transient_valid && snapshot.transient_until != 0;
+    AmpStatusSnapshot amp = show_transient ? snapshot.transient_amp : snapshot.amp;
+    AppModelData model_data = show_transient ? snapshot.transient_model_data : snapshot.model_data;
 
     out.print(F("{\"valid\":"));
     out.print(snapshot.valid ? F("true") : F("false"));
     out.print(F(",\"screen\":"));
-    out.print(static_cast<int>(current_screen));
+    out.print(amp.screen_id);
     out.print(F(",\"screenName\":"));
-    json_print_string(out, screen_name(current_screen));
+    json_print_string(out, amp.screen_name);
 
     if (!snapshot.valid) {
         out.print(F("}"));
@@ -78,11 +74,11 @@ void app_status_print_json(Print &out)
     out.print(F(",\"subBand\":"));
     out.print(amp.sub_band);
     out.print(F(",\"setup\":["));
-    for (uint8_t i = 0; i < COUNT_OF_LOCAL(status.setup); ++i) {
+    for (uint8_t i = 0; i < model_data.size; ++i) {
         if (i) {
             out.print(',');
         }
-        out.print(status.setup[i]);
+        out.print(model_data.bytes[i]);
     }
     out.print(']');
     out.print(F(",\"input\":"));
