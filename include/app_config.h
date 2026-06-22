@@ -9,6 +9,8 @@
 
 #include <Arduino.h>
 
+#include "models/amplifier_model.h"
+
 static const size_t APP_CONFIG_WIFI_SSID_LEN = 32;
 static const size_t APP_CONFIG_WIFI_PASSWORD_LEN = 64;
 static const uint32_t APP_CONFIG_DEFAULT_AMP_BAUD = 9600;
@@ -25,6 +27,7 @@ struct AppConfig {
     char wifi_ssid[APP_CONFIG_WIFI_SSID_LEN + 1] = "";
     char wifi_password[APP_CONFIG_WIFI_PASSWORD_LEN + 1] = "";
     bool display_flipped = false;
+    AmpModelId amp_model = AmpModelId::SpeExpert1k;
     AppAmpSerialPort amp_serial_port = AppAmpSerialPort::Uart1;
     uint32_t amp_baud = APP_CONFIG_DEFAULT_AMP_BAUD;
 };
@@ -34,6 +37,8 @@ bool app_config_save(void);
 AppConfig app_config_snapshot(void);
 bool app_config_display_flipped(void);
 bool app_config_set_display_flipped(bool flipped);
+AmpModelId app_config_amp_model(void);
+bool app_config_set_amp_model(AmpModelId model);
 AppAmpSerialPort app_config_amp_serial_port(void);
 const char *app_config_amp_serial_port_name(AppAmpSerialPort port);
 bool app_config_parse_amp_serial_port(const char *value, AppAmpSerialPort &port);

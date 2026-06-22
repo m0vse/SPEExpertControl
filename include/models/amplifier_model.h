@@ -12,8 +12,24 @@
 enum class AmpModelId : uint8_t {
     Unknown = 0,
     SpeExpert1k,
-    SpeModern
+    SpeExpert13k,
+    SpeExpert15k,
+    SpeExpert2k
 };
+
+struct AmpModelInfo {
+    AmpModelId id = AmpModelId::Unknown;
+    const char *key = "unknown";
+    const char *label = "Unknown";
+    bool available = false;
+};
+
+const AmpModelInfo *amp_model_catalog(uint8_t &count);
+const AmpModelInfo *amp_model_info(AmpModelId id);
+const char *amp_model_key(AmpModelId id);
+const char *amp_model_label(AmpModelId id);
+bool amp_model_available(AmpModelId id);
+bool amp_model_parse(const char *value, AmpModelId &id);
 
 struct AmpMeterSnapshot {
     const char *label = "";

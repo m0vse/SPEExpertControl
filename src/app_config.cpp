@@ -110,6 +110,11 @@ bool app_config_load(void)
                 loaded.wifi_password[sizeof(loaded.wifi_password) - 1] = '\0';
             } else if (strncmp(line, "display_flipped=", 16) == 0) {
                 loaded.display_flipped = is_truthy_config_value(line + 16);
+            } else if (strncmp(line, "amp_model=", 10) == 0) {
+                AmpModelId model = AmpModelId::Unknown;
+                if (amp_model_parse(line + 10, model) && amp_model_available(model)) {
+                    loaded.amp_model = model;
+                }
             } else if (strncmp(line, "amp_serial_port=", 16) == 0) {
                 AppAmpSerialPort port = AppAmpSerialPort::Uart1;
                 if (app_config_parse_amp_serial_port(line + 16, port)) {
@@ -157,6 +162,7 @@ bool app_config_save(void)
         fprintf(fp, "ssid=%s\n", snapshot.wifi_ssid);
         fprintf(fp, "password=%s\n", snapshot.wifi_password);
         fprintf(fp, "display_flipped=%d\n", snapshot.display_flipped ? 1 : 0);
+        fprintf(fp, "amp_model=%s\n", amp_model_key(snapshot.amp_model));
         fprintf(fp, "amp_serial_port=%s\n", app_config_amp_serial_port_name(snapshot.amp_serial_port));
         fprintf(fp, "amp_baud=%lu\n", static_cast<unsigned long>(snapshot.amp_baud));
         fclose(fp);
@@ -186,6 +192,26 @@ bool app_config_set_display_flipped(bool flipped)
     {
         ConfigLock lock;
         config.display_flipped = flipped;
+        config_loaded = true;
+    }
+    return app_config_save();
+}
+
+AmpModelId app_config_amp_model(void)
+{
+    ConfigLock lock;
+    return config.amp_model;
+}
+
+bool app_config_set_amp_model(AmpModelId model)
+{
+    if (!amp_model_available(model)) {
+        return false;
+    }
+
+    {
+        ConfigLock lock;
+        config.amp_model = model;
         config_loaded = true;
     }
     return app_config_save();

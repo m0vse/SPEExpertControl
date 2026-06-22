@@ -52,6 +52,7 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 
 - LVGL 9.5 UI on the Giga Display Shield
 - SPE Expert 1K-FA serial packet parsing and button command transmission
+- Model catalog with SPE Expert 1K-FA active and 1.3K-FA, 1.5K-FA, and 2K-FA reserved for future protocol handlers
 - Touch control for amplifier buttons and setup menus
 - FreeRTOS split between UI and amplifier serial work
 - Mutex handling around LVGL, amplifier serial, and debug serial access
@@ -126,6 +127,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | `web` | - | Print HTTP server counters, including starts, disconnects, client count, request counts, bad key requests, and the last request path/time. |
 | `serial` | `ser` | Print amplifier UART health counters. Use this when checking checksum errors, queue depth, missed packets, or whether the serial task is falling behind. |
 | `amp` | - | Print the last decoded 30-byte amplifier status packet, screen name, DTR state, band, input, antenna, CAT mode, output power setting, power, reflected power, SWR/gain, temperature, PA voltage, and PA current. |
+| `model` | `amp-model` | Print active/saved amplifier model and known model IDs. `model spe_expert_1k` is currently the only selectable runtime; unsupported models are listed but rejected until their protocol runtime exists. |
 | `scan` | - | Run a blocking WiFi scan and print SSID, RSSI, and encryption type for each network. The LCD and web UI continue to use the background WiFi services; this command is mainly for diagnostics. |
 | `stats` | `mem` | Print Mbed runtime statistics: uptime, idle/sleep times, heap usage, stack usage, and RTOS thread state/priority/free stack. |
 | `reboot` | `reset` | Reboot the controller with `NVIC_SystemReset()`. |

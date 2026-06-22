@@ -57,6 +57,10 @@ void app_status_print_json(Print &out)
     out.print(amp.screen_id);
     out.print(F(",\"screenName\":"));
     json_print_string(out, amp.screen_name);
+    out.print(F(",\"model\":"));
+    json_print_string(out, amp_model_key(amp.model));
+    out.print(F(",\"modelLabel\":"));
+    json_print_string(out, amp_model_label(amp.model));
 
     if (!snapshot.valid) {
         out.print(F("}"));

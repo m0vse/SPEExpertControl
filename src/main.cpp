@@ -183,6 +183,7 @@ static void print_console_help()
   Serial.println(F("  web         HTTP server counters"));
   Serial.println(F("  serial      Amplifier serial health counters"));
   Serial.println(F("  amp         Last amplifier status packet"));
+  Serial.println(F("  model       Show or set amplifier model"));
   Serial.println(F("  scan        Blocking WiFi scan to serial"));
   Serial.println(F("  rcu         Send RCU_ON to the amplifier"));
   Serial.println(F("  dtr         Show amplifier DTR output state"));
@@ -329,6 +330,8 @@ static void print_amp_status()
   DebugSerialLock debug_lock;
   Serial.print(F("Amp status valid="));
   Serial.println(snapshot.valid ? F("yes") : F("no"));
+  Serial.print(F("model="));
+  Serial.println(amp_model_label(amp_runtime.model_id()));
   Serial.print(F("screen="));
   Serial.print(status.screen_id);
   Serial.print(F(" ("));
@@ -381,6 +384,8 @@ static void print_controller_status()
   DebugSerialLock debug_lock;
   Serial.print(F("Controller ms="));
   Serial.print(millis());
+  Serial.print(F(" model="));
+  Serial.print(amp_model_key(amp_runtime.model_id()));
   Serial.print(F(" progress="));
   Serial.print(progress);
   Serial.print(F(" touch="));
@@ -522,6 +527,62 @@ static void enter_dfu_bootloader()
   _ontouch1200bps_();
 }
 
+static void print_amp_model_config()
+{
+  uint8_t count = 0;
+  const AmpModelInfo *models = amp_model_catalog(count);
+
+  DebugSerialLock debug_lock;
+  Serial.print(F("Active amplifier model: "));
+  Serial.println(amp_model_label(amp_runtime.model_id()));
+  Serial.print(F("Saved amplifier model: "));
+  Serial.println(amp_model_label(app_config_amp_model()));
+  Serial.println(F("Known models:"));
+  for (uint8_t i = 0; i < count; ++i) {
+    Serial.print(F("  "));
+    Serial.print(models[i].key);
+    Serial.print(F(" - "));
+    Serial.print(models[i].label);
+    Serial.print(F(" ["));
+    Serial.print(models[i].available ? F("available") : F("not implemented"));
+    Serial.println(F("]"));
+  }
+}
+
+static void set_amp_model_config(AmpModelId model)
+{
+  if (!amp_model_available(model)) {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Amplifier model is not implemented yet: "));
+    Serial.println(amp_model_label(model));
+    return;
+  }
+
+  const AmpModelId saved = app_config_amp_model();
+  if (saved == model) {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Amplifier model already saved as "));
+    Serial.println(amp_model_label(model));
+    return;
+  }
+
+  if (!app_config_set_amp_model(model)) {
+    DebugSerialLock debug_lock;
+    Serial.println(F("Failed to save amplifier model"));
+    return;
+  }
+
+  {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Saved amplifier model as "));
+    Serial.print(amp_model_label(model));
+    Serial.println(F("; rebooting to apply"));
+    Serial.flush();
+  }
+  delay(100);
+  NVIC_SystemReset();
+}
+
 static void print_amp_serial_config()
 {
   DebugSerialLock debug_lock;
@@ -631,6 +692,24 @@ static void handle_console_command(char *line)
     print_serial_status();
   } else if (strcmp(line, "amp") == 0) {
     print_amp_status();
+  } else if (strcmp(line, "model") == 0 || strcmp(line, "amp-model") == 0 || strcmp(line, "ampmodel") == 0) {
+    print_amp_model_config();
+  } else if (strncmp(line, "model ", 6) == 0) {
+    AmpModelId model = AmpModelId::Unknown;
+    if (amp_model_parse(line + 6, model)) {
+      set_amp_model_config(model);
+    } else {
+      DebugSerialLock debug_lock;
+      Serial.println(F("Unknown amplifier model. Run 'model' to list known models."));
+    }
+  } else if (strncmp(line, "amp-model ", 10) == 0) {
+    AmpModelId model = AmpModelId::Unknown;
+    if (amp_model_parse(line + 10, model)) {
+      set_amp_model_config(model);
+    } else {
+      DebugSerialLock debug_lock;
+      Serial.println(F("Unknown amplifier model. Run 'model' to list known models."));
+    }
   } else if (strcmp(line, "scan") == 0) {
     print_wifi_scan();
   } else if (strcmp(line, "stats") == 0 || strcmp(line, "mem") == 0) {
