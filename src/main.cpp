@@ -959,7 +959,22 @@ void ui_task()
 void serial_task()
 {
   uint32_t last_run_ms = millis();
+  bool last_usb_console_active = false;
   while (true) {
+  const bool usb_console_active = spe_expert1k_usb_console_active();
+  if (usb_console_active) {
+    if (!last_usb_console_active) {
+      serial_console_reset_line();
+      DebugSerialLock debug_lock;
+      Serial.println(F("Console ready. Type 'help' for commands."));
+    }
+    last_usb_console_active = true;
+    serial_console_service(handle_console_command, print_console_poll_status);
+    rtos::ThisThread::sleep_for(10ms);
+    continue;
+  }
+  last_usb_console_active = false;
+
   const uint32_t now_ms = millis();
   serial_transport_note_task_gap(now_ms - last_run_ms);
   last_run_ms = now_ms;
@@ -1002,7 +1017,7 @@ void serial_task()
 
 // Keep the amplifier remote-control stream alive if no status packets arrive.
   unsigned long now = millis();
-  if (!spe_expert1k_usb_console_active() && amp_control_remote_updates_enabled() && amp_runtime.should_send_keepalive(now, interval))
+  if (amp_control_remote_updates_enabled() && amp_runtime.should_send_keepalive(now, interval))
   {
     //Serial1.end();      // close serial port
     //delay(100);        //wait 100 millis
@@ -1028,15 +1043,8 @@ void serial_task()
 
 void console_task()
 {
-  bool last_usb_console_active = false;
   while (true) {
-    const bool usb_console_active = spe_expert1k_usb_console_active();
-    if (usb_console_active && !last_usb_console_active) {
-      serial_console_reset_line();
-    }
-    last_usb_console_active = usb_console_active;
-
-    if (!spe_expert1k_amp_uses_usb_serial() || usb_console_active) {
+    if (!spe_expert1k_amp_uses_usb_serial()) {
       serial_console_service(handle_console_command, print_console_poll_status);
     }
     rtos::ThisThread::sleep_for(10ms);
