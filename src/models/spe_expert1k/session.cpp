@@ -77,6 +77,14 @@ bool SpeExpert1kSerialSession::service_rx(AmplifierRuntime *runtime)
           process_response_packet(packet);
         }
         break;
+      case ExpertPacketParser::Result::ModernRcuFrame:
+        serial_transport_note_valid_packet();
+        completed_packet = true;
+        amplifier_runtime_note_detected_model(amp_model_detect_from_packet(read_result.raw, read_result.len));
+        if (runtime) {
+          runtime->mark_activity(millis());
+        }
+        break;
       case ExpertPacketParser::Result::InvalidChecksum:
         serial_transport_note_invalid_checksum(
           read_result.invalid_len,

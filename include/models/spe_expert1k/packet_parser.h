@@ -17,6 +17,7 @@ public:
   enum class Result {
     None,
     PacketReady,
+    ModernRcuFrame,
     InvalidChecksum
   };
 
@@ -28,6 +29,7 @@ public:
   uint8_t invalidLength() const { return invalid_length_; }
   uint8_t invalidExpectedChecksum() const { return invalid_expected_checksum_; }
   uint8_t invalidReceivedChecksum() const { return invalid_received_checksum_; }
+  uint8_t frameType() const { return frame_type_; }
 
 private:
   enum class State : uint8_t {
@@ -50,6 +52,7 @@ private:
   uint8_t bytes_ = 0x00;
   uint16_t checksum_ = 0x00;
   uint8_t checksum_lo_ = 0x00;
+  uint8_t frame_type_ = 0x00;
   uint8_t length_ = 0x00;
   uint8_t invalid_length_ = 0x00;
   uint8_t invalid_expected_checksum_ = 0x00;

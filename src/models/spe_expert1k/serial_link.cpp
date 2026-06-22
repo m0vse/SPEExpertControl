@@ -211,8 +211,11 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   result.result = parser.read(static_cast<uint8_t>(value));
   result.packet = parser.packet();
   result.len = parser.length();
+  result.frame_type = parser.frameType();
   if (result.result == ExpertPacketParser::Result::PacketReady) {
     memcpy(result.raw, parser.data(), result.len);
+  } else if (result.result == ExpertPacketParser::Result::ModernRcuFrame) {
+    result.raw[0] = result.frame_type;
   }
   result.invalid_len = parser.invalidLength();
   result.invalid_expected_checksum = parser.invalidExpectedChecksum();

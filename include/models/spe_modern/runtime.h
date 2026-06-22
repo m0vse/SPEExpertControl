@@ -11,7 +11,7 @@
 
 class SpeModernRuntime : public AmplifierRuntime {
 public:
-  explicit SpeModernRuntime(AmpModelId model_id = AmpModelId::SpeExpert13k);
+  explicit SpeModernRuntime(AmpModelId model_id = AmpModelId::SpeModern);
 
   void set_model_id(AmpModelId model_id);
   AmpModelId model_id() const override;
@@ -29,6 +29,6 @@ public:
   void note_keepalive(unsigned long now) override;
 
 private:
-  AmpModelId model_id_ = AmpModelId::SpeExpert13k;
+  AmpModelId model_id_ = AmpModelId::SpeModern;
   unsigned long last_activity_ms_ = 0;
 };

@@ -12,6 +12,7 @@
 enum class AmpModelId : uint8_t {
     Unknown = 0,
     SpeExpert1k,
+    SpeModern,
     SpeExpert13k,
     SpeExpert15k,
     SpeExpert2k

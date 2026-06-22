@@ -13,6 +13,7 @@
 
 static const AmpModelInfo MODEL_CATALOG[] = {
     {AmpModelId::SpeExpert1k, "spe_expert_1k", "SPE Expert 1K-FA", true},
+    {AmpModelId::SpeModern, "spe_modern", "SPE Expert modern protocol", false},
     {AmpModelId::SpeExpert13k, "spe_expert_13k", "SPE Expert 1.3K-FA", false},
     {AmpModelId::SpeExpert15k, "spe_expert_15k", "SPE Expert 1.5K-FA", false},
     {AmpModelId::SpeExpert2k, "spe_expert_2k", "SPE Expert 2K-FA", false},
@@ -70,6 +71,10 @@ bool amp_model_parse(const char *value, AmpModelId &id)
         id = AmpModelId::SpeExpert1k;
         return true;
     }
+    if (strcmp(value, "modern") == 0 || strcmp(value, "spe-modern") == 0 || strcmp(value, "spe_modern") == 0) {
+        id = AmpModelId::SpeModern;
+        return true;
+    }
     if (strcmp(value, "13k") == 0 || strcmp(value, "1.3k") == 0 || strcmp(value, "1.3k-fa") == 0) {
         id = AmpModelId::SpeExpert13k;
         return true;
@@ -102,6 +107,10 @@ AmpModelId amp_model_detect_from_packet(const uint8_t *data, uint8_t len)
 
     if (len == 30) {
         return AmpModelId::SpeExpert1k;
+    }
+
+    if (len == 0x6a && data[0] == 0x6a) {
+        return AmpModelId::SpeModern;
     }
 
     if (len == 67) {

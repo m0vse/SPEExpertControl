@@ -20,6 +20,13 @@ ExpertPacketParser::Result ExpertPacketParser::read(uint8_t value)
       }
       break;
     case State::Len:
+      if (value == 0x6a) {
+        frame_type_ = value;
+        data_[0] = value;
+        length_ = value;
+        resetState();
+        return Result::ModernRcuFrame;
+      }
       if (value == 1 || value == MAX_DATA || value == EXPERT_PACKET_MAX_LEN) {
         length_ = value;
         state_ = State::Data;

@@ -25,6 +25,7 @@ struct SpeExpert1kReadResult {
   Expert_Packet packet{};
   uint8_t raw[EXPERT_PACKET_MAX_LEN] = {};
   uint8_t len = 0;
+  uint8_t frame_type = 0;
   uint8_t invalid_len = 0;
   uint8_t invalid_expected_checksum = 0;
   uint8_t invalid_received_checksum = 0;
