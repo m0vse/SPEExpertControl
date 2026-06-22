@@ -100,6 +100,8 @@ The normal amplifier link uses `Serial1` through the MAX3232 RS-232 interface. T
 
 For model-protocol development or bench testing, the amplifier protocol can instead use the USB CDC `Serial` port. Open the controller setup popup and select `Amp serial: USB` from the transport dropdown, or use the serial console command `amp-serial usb`. Changing this setting saves it to QSPI storage and immediately reboots so the serial tasks restart on the selected transport. Use `Amp serial: UART` or `amp-serial uart` to return to the default.
 
+The amplifier serial baud rate is also configurable. The default is `9600`, matching the current 1K-FA setup. Supported rates are `1200`, `2400`, `4800`, `9600`, `19200`, `38400`, `57600`, and `115200`. Change this from the setup popup baud dropdown or with `amp-baud <rate>`; changing it also saves and reboots.
+
 In USB amplifier mode the normal debug console is disabled so it does not consume amplifier bytes. Press `Esc` three times on the USB serial terminal to open the console. Type `exit` or `passthrough` to return the USB port to amplifier communications. Do not use USB amplifier mode for normal operation while the amplifier is still wired to `Serial1`.
 
 ## Serial Console
@@ -130,6 +132,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | `rcu` | - | Queue an `RCU_ON` command to the amplifier. |
 | `dtr` | - | Print the configured DTR pin, logical asserted state, and actual GPIO level. With the current MAX3232 wiring, asserted DTR is `D7 LOW`. |
 | `amp-serial` | `ampserial` | Print the active and saved amplifier serial transport. Use `amp-serial uart` or `amp-serial usb` to save a new transport and reboot. |
+| `amp-baud` | `ampbaud` | Print the saved amplifier baud rate. Use `amp-baud 1200`, `2400`, `4800`, `9600`, `19200`, `38400`, `57600`, or `115200` to save a new baud rate and reboot. |
 | `exit` | `passthrough` | In USB amplifier mode, close the debug console and return USB `Serial` to amplifier communications. In normal UART mode, this reports that the console remains active. |
 | `setup` | `wifi-popup` | Open the hidden controller setup popup on the LCD. This is the same panel opened by tapping the top-left of the display. |
 | `wifi-saved` | - | Print whether saved WiFi credentials exist, the saved SSID, and password length. The password itself is not printed. |
@@ -141,7 +144,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 
 The `serial` command prints amplifier-link counters:
 
-- `transport` and `usb_console_active` - active amplifier transport and whether USB is currently reserved for the debug console.
+- `transport`, `baud`, and `usb_console_active` - active amplifier transport, saved amplifier baud rate, and whether USB is currently reserved for the debug console.
 - `rx_bytes` - bytes read from the active amplifier transport.
 - `valid_packets` - valid 30-byte amplifier packets received.
 - `invalid_checksums` - packets rejected by checksum.
@@ -175,7 +178,7 @@ The `stats` command reports Mbed heap, stack, CPU, and RTOS thread data. Thread 
 
 WiFi, display orientation, and amplifier serial transport are configured from a hidden setup popup on the LCD. Tap the top-left of the display or run the serial console `setup` command to open it.
 
-Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option for mounting the controller upside down and an amplifier serial transport dropdown. Changing the transport between UART and USB saves the setting and reboots immediately.
+Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option plus amplifier serial transport and baud dropdowns. Changing the transport or baud saves the setting and reboots immediately.
 
 Credentials are stored on the Giga QSPI filesystem. On restart, the firmware loads saved credentials and attempts to reconnect in the background. Failed attempts time out and are retried periodically without blocking the amplifier UI or serial control.
 

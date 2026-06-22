@@ -45,6 +45,7 @@
 #endif
 
 #include <string.h>
+#include <stdlib.h>
 
 using namespace std::chrono_literals;
 
@@ -186,6 +187,7 @@ static void print_console_help()
   Serial.println(F("  rcu         Send RCU_ON to the amplifier"));
   Serial.println(F("  dtr         Show amplifier DTR output state"));
   Serial.println(F("  amp-serial  Show or set amplifier serial transport"));
+  Serial.println(F("  amp-baud    Show or set amplifier serial baud rate"));
   Serial.println(F("  exit        Return USB serial to amplifier comms"));
   Serial.println(F("  setup       Open controller setup popup on the display"));
   Serial.println(F("  wifi-saved  Show saved WiFi credential state"));
@@ -276,6 +278,8 @@ static void print_serial_status()
   Serial.println(F("Amplifier serial stats:"));
   Serial.print(F("  transport="));
   Serial.println(spe_expert1k_amp_uses_usb_serial() ? F("USB Serial") : F("Serial1 UART"));
+  Serial.print(F("  baud="));
+  Serial.println(app_config_amp_baud());
   Serial.print(F("  usb_console_active="));
   Serial.println(spe_expert1k_usb_console_active() ? F("yes") : F("no"));
   Serial.print(F("  rx_bytes="));
@@ -513,7 +517,10 @@ static void print_amp_serial_config()
   Serial.println(spe_expert1k_amp_uses_usb_serial() ? F("USB Serial") : F("Serial1 UART"));
   Serial.print(F("Saved amplifier serial transport: "));
   Serial.println(app_config_amp_serial_usb() ? F("USB Serial") : F("Serial1 UART"));
+  Serial.print(F("Saved amplifier baud rate: "));
+  Serial.println(app_config_amp_baud());
   Serial.println(F("Use 'amp-serial uart' or 'amp-serial usb' to change it."));
+  Serial.println(F("Use 'amp-baud 9600' through 'amp-baud 115200' to change baud."));
 }
 
 static void set_amp_serial_config(bool usb)
@@ -536,6 +543,48 @@ static void set_amp_serial_config(bool usb)
     DebugSerialLock debug_lock;
     Serial.print(F("Saved amplifier serial transport as "));
     Serial.print(usb ? F("USB Serial") : F("Serial1 UART"));
+    Serial.println(F("; rebooting to apply"));
+    Serial.flush();
+  }
+  delay(100);
+  NVIC_SystemReset();
+}
+
+static void print_amp_baud_config()
+{
+  DebugSerialLock debug_lock;
+  Serial.print(F("Saved amplifier baud rate: "));
+  Serial.println(app_config_amp_baud());
+  Serial.println(F("Supported: 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200"));
+}
+
+static void set_amp_baud_config(uint32_t baud)
+{
+  if (!app_config_is_valid_amp_baud(baud)) {
+    DebugSerialLock debug_lock;
+    Serial.println(F("Unsupported amplifier baud rate"));
+    Serial.println(F("Supported: 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200"));
+    return;
+  }
+
+  const uint32_t saved = app_config_amp_baud();
+  if (saved == baud) {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Amplifier baud rate already saved as "));
+    Serial.println(baud);
+    return;
+  }
+
+  if (!app_config_set_amp_baud(baud)) {
+    DebugSerialLock debug_lock;
+    Serial.println(F("Failed to save amplifier baud rate"));
+    return;
+  }
+
+  {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Saved amplifier baud rate as "));
+    Serial.print(baud);
     Serial.println(F("; rebooting to apply"));
     Serial.flush();
   }
@@ -592,6 +641,12 @@ static void handle_console_command(char *line)
     set_amp_serial_config(true);
   } else if (strcmp(line, "amp-serial uart") == 0 || strcmp(line, "ampserial uart") == 0) {
     set_amp_serial_config(false);
+  } else if (strcmp(line, "amp-baud") == 0 || strcmp(line, "ampbaud") == 0) {
+    print_amp_baud_config();
+  } else if (strncmp(line, "amp-baud ", 9) == 0) {
+    set_amp_baud_config(strtoul(line + 9, nullptr, 10));
+  } else if (strncmp(line, "ampbaud ", 8) == 0) {
+    set_amp_baud_config(strtoul(line + 8, nullptr, 10));
   } else if (strcmp(line, "exit") == 0 || strcmp(line, "passthrough") == 0) {
     if (spe_expert1k_amp_uses_usb_serial()) {
       DebugSerialLock debug_lock;

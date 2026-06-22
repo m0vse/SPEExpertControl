@@ -11,10 +11,12 @@
 #include <FATFileSystem.h>
 #include <MBRBlockDevice.h>
 #include <rtos.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
 static const char *APP_CONFIG_PATH = "/fs/spe_wifi.cfg";
+static const uint32_t AMP_BAUD_OPTIONS[] = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200};
 
 static AppConfig config;
 static bool config_loaded = false;
@@ -105,6 +107,11 @@ bool app_config_load(void)
                 loaded.display_flipped = strcmp(line + 16, "1") == 0 || strcmp(line + 16, "true") == 0;
             } else if (strncmp(line, "amp_serial_usb=", 15) == 0) {
                 loaded.amp_serial_usb = strcmp(line + 15, "1") == 0 || strcmp(line + 15, "true") == 0;
+            } else if (strncmp(line, "amp_baud=", 9) == 0) {
+                const uint32_t baud = strtoul(line + 9, nullptr, 10);
+                if (app_config_is_valid_amp_baud(baud)) {
+                    loaded.amp_baud = baud;
+                }
             }
         }
         fclose(fp);
@@ -143,6 +150,7 @@ bool app_config_save(void)
         fprintf(fp, "password=%s\n", snapshot.wifi_password);
         fprintf(fp, "display_flipped=%d\n", snapshot.display_flipped ? 1 : 0);
         fprintf(fp, "amp_serial_usb=%d\n", snapshot.amp_serial_usb ? 1 : 0);
+        fprintf(fp, "amp_baud=%lu\n", static_cast<unsigned long>(snapshot.amp_baud));
         fclose(fp);
         saved = true;
     }
@@ -186,6 +194,36 @@ bool app_config_set_amp_serial_usb(bool enabled)
     {
         ConfigLock lock;
         config.amp_serial_usb = enabled;
+        config_loaded = true;
+    }
+    return app_config_save();
+}
+
+uint32_t app_config_amp_baud(void)
+{
+    ConfigLock lock;
+    return config.amp_baud;
+}
+
+bool app_config_is_valid_amp_baud(uint32_t baud)
+{
+    for (size_t i = 0; i < sizeof(AMP_BAUD_OPTIONS) / sizeof(AMP_BAUD_OPTIONS[0]); ++i) {
+        if (AMP_BAUD_OPTIONS[i] == baud) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool app_config_set_amp_baud(uint32_t baud)
+{
+    if (!app_config_is_valid_amp_baud(baud)) {
+        return false;
+    }
+
+    {
+        ConfigLock lock;
+        config.amp_baud = baud;
         config_loaded = true;
     }
     return app_config_save();

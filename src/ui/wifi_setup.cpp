@@ -60,6 +60,7 @@ static lv_obj_t *wifi_password = NULL;
 static lv_obj_t *display_flip_button = NULL;
 static lv_obj_t *display_flip_label = NULL;
 static lv_obj_t *amp_serial_dropdown = NULL;
+static lv_obj_t *amp_baud_dropdown = NULL;
 static lv_obj_t *wifi_keyboard = NULL;
 static lv_obj_t *wifi_status_label = NULL;
 static lv_obj_t *wifi_hotspot = NULL;
@@ -70,6 +71,7 @@ static void wifi_skip_event_cb(lv_event_t *e);
 static void wifi_password_event_cb(lv_event_t *e);
 static void display_flip_event_cb(lv_event_t *e);
 static void amp_serial_event_cb(lv_event_t *e);
+static void amp_baud_event_cb(lv_event_t *e);
 static void wifi_hotspot_event_cb(lv_event_t *e);
 static void connect_selected_wifi(void);
 static void wifi_keyboard_set_visible(bool visible);
@@ -81,6 +83,8 @@ static void wifi_set_status_text(const char *status_text, const char *startup_te
 static void wifi_apply_ui_updates(void);
 static void wifi_apply_scan_results(void);
 static void reboot_after_config_change(const char *message);
+static uint32_t amp_baud_from_index(uint16_t index);
+static uint16_t amp_baud_to_index(uint32_t baud);
 
 class WifiStateLock {
 public:
@@ -121,7 +125,7 @@ void wifi_setup_create(void) {
     lv_obj_set_pos(title, 0, 0);
 
     display_flip_button = lv_button_create(wifi_panel);
-    lv_obj_set_size(display_flip_button, 220, 42);
+    lv_obj_set_size(display_flip_button, 180, 42);
     lv_obj_set_pos(display_flip_button, 0, 30);
     lv_obj_add_event_cb(display_flip_button, display_flip_event_cb, LV_EVENT_CLICKED, NULL);
     display_flip_label = lv_label_create(display_flip_button);
@@ -129,11 +133,18 @@ void wifi_setup_create(void) {
     lv_obj_center(display_flip_label);
 
     amp_serial_dropdown = lv_dropdown_create(wifi_panel);
-    lv_obj_set_size(amp_serial_dropdown, 250, 42);
-    lv_obj_set_pos(amp_serial_dropdown, 245, 30);
+    lv_obj_set_size(amp_serial_dropdown, 220, 42);
+    lv_obj_set_pos(amp_serial_dropdown, 200, 30);
     lv_dropdown_set_options(amp_serial_dropdown, "Amp serial: UART\nAmp serial: USB");
     lv_dropdown_set_selected(amp_serial_dropdown, app_config_amp_serial_usb() ? 1 : 0);
     lv_obj_add_event_cb(amp_serial_dropdown, amp_serial_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    amp_baud_dropdown = lv_dropdown_create(wifi_panel);
+    lv_obj_set_size(amp_baud_dropdown, 170, 42);
+    lv_obj_set_pos(amp_baud_dropdown, 445, 30);
+    lv_dropdown_set_options(amp_baud_dropdown, "1200 baud\n2400 baud\n4800 baud\n9600 baud\n19200 baud\n38400 baud\n57600 baud\n115200 baud");
+    lv_dropdown_set_selected(amp_baud_dropdown, amp_baud_to_index(app_config_amp_baud()));
+    lv_obj_add_event_cb(amp_baud_dropdown, amp_baud_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     wifi_dropdown = lv_dropdown_create(wifi_panel);
     lv_obj_set_size(wifi_dropdown, 430, 42);
@@ -629,6 +640,26 @@ static void amp_serial_event_cb(lv_event_t *e) {
     reboot_after_config_change(enabled ? "USB amp serial saved. Rebooting..." : "UART amp serial saved. Rebooting...");
 }
 
+static void amp_baud_event_cb(lv_event_t *e) {
+    lv_obj_t *dropdown = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    const uint32_t baud = amp_baud_from_index(lv_dropdown_get_selected(dropdown));
+    const uint32_t current = app_config_amp_baud();
+
+    if (baud == current) {
+        return;
+    }
+
+    if (!app_config_set_amp_baud(baud)) {
+        lv_dropdown_set_selected(dropdown, amp_baud_to_index(current));
+        lv_label_set_text(wifi_status_label, "Amp baud setting changed, but saving failed.");
+        return;
+    }
+
+    char message[64];
+    snprintf(message, sizeof(message), "Amp baud %lu saved. Rebooting...", static_cast<unsigned long>(baud));
+    reboot_after_config_change(message);
+}
+
 static void wifi_hotspot_event_cb(lv_event_t *e) {
     (void)e;
     {
@@ -879,4 +910,22 @@ static void reboot_after_config_change(const char *message) {
     Serial.flush();
     delay(250);
     NVIC_SystemReset();
+}
+
+static uint32_t amp_baud_from_index(uint16_t index) {
+    static const uint32_t baud_options[] = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200};
+    if (index >= sizeof(baud_options) / sizeof(baud_options[0])) {
+        return APP_CONFIG_DEFAULT_AMP_BAUD;
+    }
+    return baud_options[index];
+}
+
+static uint16_t amp_baud_to_index(uint32_t baud) {
+    static const uint32_t baud_options[] = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200};
+    for (uint16_t i = 0; i < sizeof(baud_options) / sizeof(baud_options[0]); ++i) {
+        if (baud_options[i] == baud) {
+            return i;
+        }
+    }
+    return amp_baud_to_index(APP_CONFIG_DEFAULT_AMP_BAUD);
 }

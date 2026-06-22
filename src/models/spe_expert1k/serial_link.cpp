@@ -40,6 +40,7 @@ static uint32_t last_available = 0;
 static uint8_t usb_escape_count = 0;
 static bool usb_console_active = false;
 static bool amp_serial_usb = false;
+static uint32_t amp_baud = APP_CONFIG_DEFAULT_AMP_BAUD;
 
 class SerialLock {
 public:
@@ -114,10 +115,11 @@ void spe_expert1k_serial_begin()
 {
   SerialLock lock;
   amp_serial_usb = app_config_amp_serial_usb();
+  amp_baud = app_config_amp_baud();
   usb_escape_count = 0;
   usb_console_active = false;
   if (!amp_serial_usb) {
-    Serial1.begin(9600);
+    Serial1.begin(amp_baud);
   }
 }
 
