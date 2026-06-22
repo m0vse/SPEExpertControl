@@ -53,6 +53,7 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 - LVGL 9.5 UI on the Giga Display Shield
 - SPE Expert 1K-FA serial packet parsing and button command transmission
 - Model catalog with SPE Expert 1K-FA active and 1.3K-FA, 1.5K-FA, and 2K-FA reserved for future protocol handlers
+- Placeholder runtime/session classes for the newer SPE protocol family, kept unavailable until protocol support is implemented and tested
 - Touch control for amplifier buttons and setup menus
 - FreeRTOS split between UI and amplifier serial work
 - Mutex handling around LVGL, amplifier serial, and debug serial access
