@@ -2,7 +2,7 @@
 
 Copyright (C) 2026 Phil Taylor (M0VSE)
 
-SPEExpertControl is a PlatformIO firmware project for controlling SPE Expert amplifiers from an Arduino Giga R1 with the Arduino Giga Display Shield. The current supported amplifier model is the SPE Expert 1K-FA.
+SPEExpertControl is a PlatformIO firmware project for controlling SPE Expert amplifiers from an Arduino Giga R1 with the Arduino Giga Display Shield. The SPE Expert 1K-FA is the tested hardware target. Initial support for the newer SPE Expert 1.3K-FA, 1.5K-FA, and 2K-FA family is included through the modern RCU LCD screen protocol, but that path is provisional and has only been validated with the bundled simulator so far.
 
 The project provides a local LVGL touch interface, serial control of the amplifier, WiFi setup, a serial debug console, and a lightweight browser UI that mirrors the LCD screens.
 
@@ -13,7 +13,7 @@ The project provides a local LVGL touch interface, serial control of the amplifi
 - Arduino Giga R1, M7 core
 - Arduino Giga Display Shield
 - Two-channel MAX3232 level shifter connected to the first UART and amplifier DTR
-- SPE Expert 1K-FA amplifier
+- SPE Expert 1K-FA amplifier, or a newer SPE Expert 1.3K-FA/1.5K-FA/2K-FA amplifier for provisional modern-protocol testing
 
 ### Enclosure
 
@@ -51,9 +51,9 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 ## Current Features
 
 - LVGL 9.5 UI on the Giga Display Shield
-- SPE Expert 1K-FA serial packet parsing and button command transmission
 - Generic amplifier bootstrap that sends the shared `0x80` RCU_ON probe and selects the 1K or modern protocol runtime from the first valid response
-- SPE Expert 1K-FA serial packet parsing and preliminary modern SPE RCU LCD frame parsing for the 1.3K-FA, 1.5K-FA, and 2K-FA family
+- SPE Expert 1K-FA serial packet parsing and button command transmission
+- Preliminary modern SPE RCU LCD frame parsing and mirrored front-panel control for the 1.3K-FA, 1.5K-FA, and 2K-FA family; simulator-tested only, not yet validated on real modern amplifier hardware
 - Touch control for amplifier buttons and setup menus
 - FreeRTOS split between UI and amplifier serial work
 - Mutex handling around LVGL, amplifier serial, and debug serial access
