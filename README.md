@@ -73,7 +73,7 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 - `src/ui/` - LVGL screen construction, UI helpers, WiFi setup popup, and UI assets
 - `src/models/spe_expert1k/` - SPE Expert 1K-FA model-specific menu metadata
 - `include/` - public headers, LVGL declarations, model definitions, and configuration
-- `tools/` - PlatformIO helper scripts used during builds
+- `tools/` - PlatformIO helper scripts and bench-test utilities, including the modern SPE protocol simulator
 - `platformio.ini` - PlatformIO environments and build configuration
 
 ## Build
@@ -105,6 +105,16 @@ For model-protocol development or bench testing, the amplifier protocol can inst
 The amplifier serial baud rate is also configurable. The default is `9600`, matching the current 1K-FA setup. Supported rates are `1200`, `2400`, `4800`, `9600`, `19200`, `38400`, `57600`, and `115200`. Change this from the setup popup baud dropdown or with `amp-baud <rate>`; changing it also saves and reboots.
 
 In USB amplifier mode the normal debug console is disabled so it does not consume amplifier bytes. Press `Esc` three times on the USB serial terminal to open the console. Type `exit` or `passthrough` to return the USB port to amplifier communications. Do not use USB amplifier mode for normal operation while the amplifier is still wired to `Serial1`.
+
+## Modern SPE Simulator
+
+The repository includes a Python simulator for the newer SPE Expert 1.3K-FA, 1.5K-FA, and 2K-FA serial protocol so parser work can continue without one of those amplifiers on the bench. It uses real 1.5K-FA RCU LCD payload captures from `vu2cpl/macexpert-spe` and can serve either a TCP socket or a local serial port.
+
+```powershell
+python tools\spe_modern_simulator.py --tcp 127.0.0.1:9901 --ticker 0.5
+```
+
+See [tools/spe_modern_simulator.md](tools/spe_modern_simulator.md) for serial-port usage, supported commands, and the fixture format.
 
 ## Serial Console
 
