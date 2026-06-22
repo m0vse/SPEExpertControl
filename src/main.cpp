@@ -334,6 +334,8 @@ static void print_amp_status()
   Serial.println(snapshot.valid ? F("yes") : F("no"));
   Serial.print(F("model="));
   Serial.println(amp_model_label(amplifier_runtime_active_model_id()));
+  Serial.print(F("detected_model="));
+  Serial.println(amp_model_label(amplifier_runtime_detected_model_id()));
   Serial.print(F("screen="));
   Serial.print(status.screen_id);
   Serial.print(F(" ("));
@@ -389,6 +391,8 @@ static void print_controller_status()
   Serial.print(millis());
   Serial.print(F(" model="));
   Serial.print(amp_model_key(amplifier_runtime_active_model_id()));
+  Serial.print(F(" detected="));
+  Serial.print(amp_model_key(amplifier_runtime_detected_model_id()));
   Serial.print(F(" progress="));
   Serial.print(progress);
   Serial.print(F(" touch="));
@@ -539,6 +543,8 @@ static void print_amp_model_config()
   DebugSerialLock debug_lock;
   Serial.print(F("Active amplifier model: "));
   Serial.println(amp_model_label(amplifier_runtime_active_model_id()));
+  Serial.print(F("Detected amplifier model: "));
+  Serial.println(amp_model_label(amplifier_runtime_detected_model_id()));
   Serial.print(F("Saved amplifier model: "));
   Serial.println(amp_model_label(app_config_amp_model()));
   Serial.println(F("Known models:"));
@@ -867,9 +873,7 @@ void setup() {
 
 #if SPE_BRINGUP_LEVEL >= 1
   app_config_load();
-  if (!amplifier_runtime_select(app_config_amp_model())) {
-    amplifier_runtime_select(AmpModelId::SpeExpert1k);
-  }
+  amplifier_runtime_select_bootstrap_detector();
   amp_control_bind_runtime(amplifier_runtime_active());
   giga_lvgl_display_set_flipped(app_config_display_flipped());
   boot_stage(1, F("display begin"));

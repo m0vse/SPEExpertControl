@@ -10,6 +10,7 @@
 #include "app_config.h"
 #include "serial/transport_stats.h"
 #include <rtos.h>
+#include <string.h>
 
 #ifndef SPE_VERBOSE_PACKET_LOG
 #define SPE_VERBOSE_PACKET_LOG 0
@@ -210,6 +211,9 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   result.result = parser.read(static_cast<uint8_t>(value));
   result.packet = parser.packet();
   result.len = parser.length();
+  if (result.result == ExpertPacketParser::Result::PacketReady) {
+    memcpy(result.raw, parser.data(), result.len);
+  }
   result.invalid_len = parser.invalidLength();
   result.invalid_expected_checksum = parser.invalidExpectedChecksum();
   result.invalid_received_checksum = parser.invalidReceivedChecksum();

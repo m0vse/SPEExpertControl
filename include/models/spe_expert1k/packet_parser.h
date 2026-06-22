@@ -10,6 +10,8 @@
 #include <stdint.h>
 #include "models/spe_expert1k/expertpackets.h"
 
+static const uint8_t EXPERT_PACKET_MAX_LEN = 67;
+
 class ExpertPacketParser {
 public:
   enum class Result {
@@ -21,6 +23,7 @@ public:
   Result read(uint8_t value);
 
   const Expert_Packet &packet() const { return packet_; }
+  const uint8_t *data() const { return data_; }
   uint8_t length() const { return length_; }
   uint8_t invalidLength() const { return invalid_length_; }
   uint8_t invalidExpectedChecksum() const { return invalid_expected_checksum_; }
@@ -31,7 +34,10 @@ private:
     Sync,
     Len,
     Data,
-    Sum
+    Sum,
+    SumHi,
+    Cr,
+    Lf
   };
 
   void reset();
@@ -40,8 +46,10 @@ private:
 
   State state_ = State::Sync;
   Expert_Packet packet_{};
+  uint8_t data_[EXPERT_PACKET_MAX_LEN] = {};
   uint8_t bytes_ = 0x00;
-  uint8_t checksum_ = 0x00;
+  uint16_t checksum_ = 0x00;
+  uint8_t checksum_lo_ = 0x00;
   uint8_t length_ = 0x00;
   uint8_t invalid_length_ = 0x00;
   uint8_t invalid_expected_checksum_ = 0x00;

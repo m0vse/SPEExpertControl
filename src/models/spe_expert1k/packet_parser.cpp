@@ -20,7 +20,7 @@ ExpertPacketParser::Result ExpertPacketParser::read(uint8_t value)
       }
       break;
     case State::Len:
-      if (value == 1 || value == MAX_DATA) {
+      if (value == 1 || value == MAX_DATA || value == EXPERT_PACKET_MAX_LEN) {
         length_ = value;
         state_ = State::Data;
       } else {
@@ -29,22 +29,58 @@ ExpertPacketParser::Result ExpertPacketParser::read(uint8_t value)
       bytes_ = 0x00;
       break;
     case State::Data:
-      reinterpret_cast<uint8_t *>(&packet_)[bytes_++] = value;
+      data_[bytes_] = value;
+      if (bytes_ < sizeof(packet_)) {
+        reinterpret_cast<uint8_t *>(&packet_)[bytes_] = value;
+      }
+      ++bytes_;
       checksum_ += value;
       if (bytes_ == length_) {
         state_ = State::Sum;
       }
       break;
     case State::Sum:
-      if (checksum_ == value) {
+      if (length_ == EXPERT_PACKET_MAX_LEN) {
+        checksum_lo_ = value;
+        state_ = State::SumHi;
+        break;
+      }
+      if (static_cast<uint8_t>(checksum_) == value) {
         resetState();
         return Result::PacketReady;
       }
       invalid_length_ = length_;
-      invalid_expected_checksum_ = checksum_;
+      invalid_expected_checksum_ = static_cast<uint8_t>(checksum_);
       invalid_received_checksum_ = value;
       resetFromUnexpected(value);
       return Result::InvalidChecksum;
+    case State::SumHi:
+    {
+      const uint16_t received = static_cast<uint16_t>(checksum_lo_) | (static_cast<uint16_t>(value) << 8);
+      if (checksum_ == received) {
+        state_ = State::Cr;
+        break;
+      }
+      invalid_length_ = length_;
+      invalid_expected_checksum_ = static_cast<uint8_t>(checksum_ & 0xff);
+      invalid_received_checksum_ = checksum_lo_;
+      resetFromUnexpected(value);
+      return Result::InvalidChecksum;
+    }
+    case State::Cr:
+      if (value == 13) {
+        state_ = State::Lf;
+      } else {
+        resetFromUnexpected(value);
+      }
+      break;
+    case State::Lf:
+      if (value == 10) {
+        resetState();
+        return Result::PacketReady;
+      }
+      resetFromUnexpected(value);
+      break;
   }
 
   return Result::None;
@@ -60,6 +96,7 @@ void ExpertPacketParser::resetState()
 {
   bytes_ = 0x00;
   checksum_ = 0x00;
+  checksum_lo_ = 0x00;
   state_ = State::Sync;
 }
 

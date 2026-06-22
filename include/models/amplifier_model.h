@@ -30,6 +30,7 @@ const char *amp_model_key(AmpModelId id);
 const char *amp_model_label(AmpModelId id);
 bool amp_model_available(AmpModelId id);
 bool amp_model_parse(const char *value, AmpModelId &id);
+AmpModelId amp_model_detect_from_packet(const uint8_t *data, uint8_t len);
 
 struct AmpMeterSnapshot {
     const char *label = "";

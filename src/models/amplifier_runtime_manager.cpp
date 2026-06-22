@@ -15,6 +15,7 @@ static SpeExpert1kRuntime spe_expert1k_runtime;
 static SpeExpert1kSerialSession spe_expert1k_session;
 static AmplifierRuntime *active_runtime = nullptr;
 static AmplifierSerialSession *active_session = nullptr;
+static AmpModelId detected_model = AmpModelId::Unknown;
 
 bool amplifier_runtime_select(AmpModelId model)
 {
@@ -25,6 +26,23 @@ bool amplifier_runtime_select(AmpModelId model)
       return true;
     default:
       return false;
+  }
+}
+
+bool amplifier_runtime_select_bootstrap_detector()
+{
+  return amplifier_runtime_select(AmpModelId::SpeExpert1k);
+}
+
+void amplifier_runtime_note_detected_model(AmpModelId model)
+{
+  if (model == AmpModelId::Unknown || detected_model == model) {
+    return;
+  }
+
+  detected_model = model;
+  if (amp_model_available(model)) {
+    amplifier_runtime_select(model);
   }
 }
 
@@ -41,6 +59,11 @@ AmplifierSerialSession *amplifier_session_active()
 AmpModelId amplifier_runtime_active_model_id()
 {
   return active_runtime ? active_runtime->model_id() : AmpModelId::Unknown;
+}
+
+AmpModelId amplifier_runtime_detected_model_id()
+{
+  return detected_model;
 }
 
 SpeExpert1kRuntime *amplifier_runtime_spe_expert1k()

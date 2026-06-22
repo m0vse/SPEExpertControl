@@ -85,3 +85,37 @@ bool amp_model_parse(const char *value, AmpModelId &id)
 
     return false;
 }
+
+static bool packet_has_modern_id_at(const uint8_t *data, uint8_t len, uint8_t offset, const char *id)
+{
+    return data && len >= offset + 3 &&
+           data[offset] == static_cast<uint8_t>(id[0]) &&
+           data[offset + 1] == static_cast<uint8_t>(id[1]) &&
+           data[offset + 2] == static_cast<uint8_t>(id[2]);
+}
+
+AmpModelId amp_model_detect_from_packet(const uint8_t *data, uint8_t len)
+{
+    if (!data) {
+        return AmpModelId::Unknown;
+    }
+
+    if (len == 30) {
+        return AmpModelId::SpeExpert1k;
+    }
+
+    if (len == 67) {
+        const uint8_t id_offset = data[0] == ',' ? 1 : 0;
+        if (packet_has_modern_id_at(data, len, id_offset, "13K")) {
+            return AmpModelId::SpeExpert13k;
+        }
+        if (packet_has_modern_id_at(data, len, id_offset, "15K")) {
+            return AmpModelId::SpeExpert15k;
+        }
+        if (packet_has_modern_id_at(data, len, id_offset, "20K")) {
+            return AmpModelId::SpeExpert2k;
+        }
+    }
+
+    return AmpModelId::Unknown;
+}

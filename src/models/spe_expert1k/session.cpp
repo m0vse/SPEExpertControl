@@ -10,6 +10,7 @@
 #include <Arduino.h>
 
 #include "models/amplifier_runtime.h"
+#include "models/amplifier_runtime_manager.h"
 #include "models/spe_expert1k/expertpackets.h"
 #include "models/spe_expert1k/packet_parser.h"
 #include "models/spe_expert1k/serial_link.h"
@@ -61,11 +62,16 @@ bool SpeExpert1kSerialSession::service_rx(AmplifierRuntime *runtime)
       case ExpertPacketParser::Result::PacketReady:
         serial_transport_note_valid_packet();
         completed_packet = true;
+        amplifier_runtime_note_detected_model(amp_model_detect_from_packet(read_result.raw, read_result.len));
         if (read_result.len == 30) {
           if (runtime) {
             runtime->mark_activity(millis());
           }
           spe_expert1k_queue_packet(read_result.packet, read_result.len);
+        } else if (read_result.len == EXPERT_PACKET_MAX_LEN) {
+          if (runtime) {
+            runtime->mark_activity(millis());
+          }
         } else {
           const AmplifierSessionPacket packet{&read_result.packet, read_result.len};
           process_response_packet(packet);

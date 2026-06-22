@@ -14,13 +14,19 @@ class AmplifierSerialSession;
 class SpeExpert1kRuntime;
 
 /**
- * Select the active runtime implementation for the configured amplifier model.
+ * Select the active runtime implementation for an amplifier model.
  *
  * Only the SPE Expert 1K-FA runtime is currently implemented. Unsupported
  * model IDs are rejected by returning false and leaving the current runtime
  * unchanged.
  */
 bool amplifier_runtime_select(AmpModelId model);
+
+/**
+ * Select the startup session used to detect the amplifier protocol.
+ */
+bool amplifier_runtime_select_bootstrap_detector();
+void amplifier_runtime_note_detected_model(AmpModelId model);
 
 /**
  * Return the currently selected runtime. A valid runtime is available after
@@ -37,6 +43,7 @@ AmplifierSerialSession *amplifier_session_active();
  * Return the active model ID, or Unknown if no runtime has been selected yet.
  */
 AmpModelId amplifier_runtime_active_model_id();
+AmpModelId amplifier_runtime_detected_model_id();
 
 /**
  * Return the concrete SPE Expert 1K-FA runtime when it is active.
