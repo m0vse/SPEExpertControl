@@ -13,5 +13,6 @@ using ConsoleCommandHandler = void (*)(char *line);
 using ConsolePollHandler = void (*)(unsigned long now);
 
 void serial_console_service(ConsoleCommandHandler command_handler, ConsolePollHandler poll_handler);
+void serial_console_reset_line(void);
 void serial_console_set_poll_enabled(bool enabled);
 bool serial_console_poll_enabled();

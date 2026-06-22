@@ -98,6 +98,11 @@ static void begin_uart_port(uint32_t baud)
   }
 }
 
+static void set_usb_console_active_locked(bool active)
+{
+  usb_console_active = active;
+}
+
 static bool dequeue_command(QueuedAmpCommand &queued)
 {
   CommandQueueLock lock;
@@ -188,7 +193,10 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   if (amp_serial_is_usb()) {
     if (value == 0x1b) {
       if (++usb_escape_count >= 3) {
-        usb_console_active = true;
+        {
+          SerialLock lock;
+          set_usb_console_active_locked(true);
+        }
         usb_escape_count = 0;
         Serial.println();
         Serial.println(F("USB serial console active. Type 'exit' to return USB to amplifier comms."));
@@ -221,16 +229,18 @@ bool spe_expert1k_amp_uses_usb_serial()
 
 bool spe_expert1k_usb_console_active()
 {
+  SerialLock lock;
   return amp_serial_is_usb() && usb_console_active;
 }
 
 void spe_expert1k_usb_console_release()
 {
+  SerialLock lock;
   if (!amp_serial_is_usb()) {
     return;
   }
   usb_escape_count = 0;
-  usb_console_active = false;
+  set_usb_console_active_locked(false);
 }
 
 bool spe_expert1k_queue_command(std::initializer_list<uint8_t> cmd)

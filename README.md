@@ -129,6 +129,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | `scan` | - | Run a blocking WiFi scan and print SSID, RSSI, and encryption type for each network. The LCD and web UI continue to use the background WiFi services; this command is mainly for diagnostics. |
 | `stats` | `mem` | Print Mbed runtime statistics: uptime, idle/sleep times, heap usage, stack usage, and RTOS thread state/priority/free stack. |
 | `reboot` | `reset` | Reboot the controller with `NVIC_SystemReset()`. |
+| `dfu` | `bootloader` | Reboot into the Giga DFU bootloader for firmware upload. |
 | `rcu` | - | Queue an `RCU_ON` command to the amplifier. |
 | `dtr` | - | Print the configured DTR pin, logical asserted state, and actual GPIO level. With the current MAX3232 wiring, asserted DTR is `D7 LOW`. |
 | `amp-serial` | `ampserial` | Print the active and saved amplifier serial transport. Use `amp-serial uart1`, `uart2`, `uart3`, `uart4`, or `usb` to save a new transport and reboot. |

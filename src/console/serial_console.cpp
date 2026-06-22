@@ -56,6 +56,13 @@ void serial_console_service(ConsoleCommandHandler command_handler, ConsolePollHa
   poll_handler(now);
 }
 
+void serial_console_reset_line(void)
+{
+  line_len = 0;
+  line_buffer[0] = '\0';
+  last_was_line_end = false;
+}
+
 void serial_console_set_poll_enabled(bool enabled)
 {
   poll_enabled = enabled;
