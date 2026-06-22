@@ -21,6 +21,7 @@
 #include "amp_dtr.h"
 #include "models/amplifier_runtime.h"
 #include "models/amplifier_runtime_manager.h"
+#include "models/amplifier_session.h"
 #include "models/spe_expert1k/expertpackets.h"
 #include "models/spe_expert1k/lcd_renderer.h"
 #include "models/spe_expert1k/menuitems.h"
@@ -63,7 +64,7 @@ uint8_t progress = 0;
 
 #define COUNT_OF(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
-void process_packet(const Expert_Packet &packet_in, uint8_t len_in);
+static void handle_amp_session_ui_packet(const AmplifierSessionPacket &packet);
 void ui_task(void);
 void serial_task(void);
 void console_task(void);
@@ -123,9 +124,8 @@ public:
 
 static void process_next_queued_amp_packet()
 {
-  SpeExpert1kQueuedPacket queued;
-  if (spe_expert1k_dequeue_packet(queued)) {
-    process_packet(queued.packet, queued.len);
+  if (AmplifierSerialSession *session = amplifier_session_active()) {
+    session->process_next_ui_packet(handle_amp_session_ui_packet);
   }
 }
 
@@ -280,11 +280,12 @@ static void print_serial_status()
   DebugSerialLock debug_lock;
   Serial.println(F("Amplifier serial stats:"));
   Serial.print(F("  transport="));
-  Serial.println(app_config_amp_serial_port_name(spe_expert1k_amp_serial_port()));
+  AmplifierSerialSession *session = amplifier_session_active();
+  Serial.println(app_config_amp_serial_port_name(session ? session->serial_port() : app_config_amp_serial_port()));
   Serial.print(F("  baud="));
   Serial.println(app_config_amp_baud());
   Serial.print(F("  usb_console_active="));
-  Serial.println(spe_expert1k_usb_console_active() ? F("yes") : F("no"));
+  Serial.println(session && session->usb_console_active() ? F("yes") : F("no"));
   Serial.print(F("  rx_bytes="));
   Serial.println(snapshot.rx_bytes);
   Serial.print(F("  valid_packets="));
@@ -401,7 +402,8 @@ static void print_controller_status()
   Serial.println(F(")"));
 #if SPE_BRINGUP_LEVEL >= 5
   Serial.print(F("serial1_available="));
-  Serial.println(spe_expert1k_serial_available());
+  AmplifierSerialSession *session = amplifier_session_active();
+  Serial.println(session ? session->available() : 0);
 #endif
 }
 
@@ -589,7 +591,8 @@ static void print_amp_serial_config()
 {
   DebugSerialLock debug_lock;
   Serial.print(F("Active amplifier serial transport: "));
-  Serial.println(app_config_amp_serial_port_name(spe_expert1k_amp_serial_port()));
+  AmplifierSerialSession *session = amplifier_session_active();
+  Serial.println(app_config_amp_serial_port_name(session ? session->serial_port() : app_config_amp_serial_port()));
   Serial.print(F("Saved amplifier serial transport: "));
   Serial.println(app_config_amp_serial_port_name(app_config_amp_serial_port()));
   Serial.print(F("Saved amplifier baud rate: "));
@@ -755,12 +758,13 @@ static void handle_console_command(char *line)
   } else if (strncmp(line, "ampbaud ", 8) == 0) {
     set_amp_baud_config(strtoul(line + 8, nullptr, 10));
   } else if (strcmp(line, "exit") == 0 || strcmp(line, "passthrough") == 0) {
-    if (spe_expert1k_amp_uses_usb_serial()) {
+    AmplifierSerialSession *session = amplifier_session_active();
+    if (session && session->amp_uses_usb_serial()) {
       DebugSerialLock debug_lock;
       Serial.println(F("Returning USB serial to amplifier comms"));
       Serial.flush();
       serial_console_reset_line();
-      spe_expert1k_usb_console_release();
+      session->release_usb_console();
     } else {
       DebugSerialLock debug_lock;
       Serial.println(F("Amplifier comms are not using USB Serial; console remains active"));
@@ -810,7 +814,9 @@ static void print_console_poll_status(unsigned long now)
 #if SPE_BRINGUP_LEVEL >= 5
   int serial1_available = 0;
   {
-    serial1_available = spe_expert1k_serial_available();
+    if (AmplifierSerialSession *session = amplifier_session_active()) {
+      serial1_available = session->available();
+    }
   }
 #endif
 
@@ -905,7 +911,9 @@ void setup() {
 
 #if SPE_BRINGUP_LEVEL >= 5
   boot_stage(7, F("serial1 begin"));
-  spe_expert1k_serial_begin(); // Amp connection
+  if (AmplifierSerialSession *session = amplifier_session_active()) {
+    session->begin();
+  }
 #endif
 
   Serial.println(F("Starting Expert1K controller"));
@@ -1048,7 +1056,8 @@ void serial_task()
   uint32_t last_run_ms = millis();
   bool last_usb_console_active = false;
   while (true) {
-    const bool usb_console_active = spe_expert1k_usb_console_active();
+    AmplifierSerialSession *session = amplifier_session_active();
+    const bool usb_console_active = session && session->usb_console_active();
     if (usb_console_active) {
       if (!last_usb_console_active) {
         serial_console_reset_line();
@@ -1065,44 +1074,7 @@ void serial_task()
     const uint32_t now_ms = millis();
     serial_transport_note_task_gap(now_ms - last_run_ms);
     last_run_ms = now_ms;
-    uint32_t drained_bytes = 0;
-    bool completed_packet = false;
-
-    // Check for serial data
-    while (true) {
-      SpeExpert1kReadResult read_result;
-      if (!spe_expert1k_serial_read(read_result)) {
-        break;
-      }
-      ++drained_bytes;
-
-      switch (read_result.result) {
-        case ExpertPacketParser::Result::PacketReady:
-          serial_transport_note_valid_packet();
-          completed_packet = true;
-          if (read_result.len == 30) {
-            if (AmplifierRuntime *runtime = amplifier_runtime_active()) {
-              runtime->mark_activity(millis());
-            }
-            spe_expert1k_queue_packet(read_result.packet, read_result.len);
-          } else {
-            process_packet(read_result.packet, read_result.len);
-          }
-          break;
-        case ExpertPacketParser::Result::InvalidChecksum:
-        {
-          serial_transport_note_invalid_checksum(
-            read_result.invalid_len,
-            read_result.invalid_expected_checksum,
-            read_result.invalid_received_checksum,
-            read_result.last_available);
-          break;
-        }
-        case ExpertPacketParser::Result::None:
-          break;
-      }
-    }
-    serial_transport_note_drain_burst(drained_bytes);
+    bool completed_packet = session && session->service_rx(amplifier_runtime_active());
 
     // Keep the amplifier remote-control stream alive if no status packets arrive.
     unsigned long now = millis();
@@ -1130,7 +1102,8 @@ void serial_task()
 void console_task()
 {
   while (true) {
-    if (!spe_expert1k_amp_uses_usb_serial()) {
+    AmplifierSerialSession *session = amplifier_session_active();
+    if (!session || !session->amp_uses_usb_serial()) {
       serial_console_service(handle_console_command, print_console_poll_status);
     }
     rtos::ThisThread::sleep_for(10ms);
@@ -1182,8 +1155,19 @@ static SpeExpert1kRuntimeBindings spe_runtime_bindings()
   };
 }
 
-void process_packet(const Expert_Packet &packet_in, uint8_t len_in)
+static void handle_amp_session_ui_packet(const AmplifierSessionPacket &session_packet)
 {
+  if (!session_packet.data) {
+    return;
+  }
+
+  if (amplifier_runtime_active_model_id() != AmpModelId::SpeExpert1k) {
+    return;
+  }
+
+  const Expert_Packet &packet_in = *static_cast<const Expert_Packet *>(session_packet.data);
+  const uint8_t len_in = session_packet.len;
+
   // We have a valid packet!
   if (len_in == 1) {
     // This is a response packet

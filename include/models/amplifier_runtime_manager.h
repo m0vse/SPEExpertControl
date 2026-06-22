@@ -10,6 +10,7 @@
 #include "models/amplifier_model.h"
 
 class AmplifierRuntime;
+class AmplifierSerialSession;
 class SpeExpert1kRuntime;
 
 /**
@@ -26,6 +27,11 @@ bool amplifier_runtime_select(AmpModelId model);
  * amplifier_runtime_select() has been called during setup.
  */
 AmplifierRuntime *amplifier_runtime_active();
+
+/**
+ * Return the active model-specific serial session.
+ */
+AmplifierSerialSession *amplifier_session_active();
 
 /**
  * Return the active model ID, or Unknown if no runtime has been selected yet.

@@ -9,15 +9,19 @@
 
 #include "models/amplifier_runtime.h"
 #include "models/spe_expert1k/runtime.h"
+#include "models/spe_expert1k/session.h"
 
 static SpeExpert1kRuntime spe_expert1k_runtime;
+static SpeExpert1kSerialSession spe_expert1k_session;
 static AmplifierRuntime *active_runtime = nullptr;
+static AmplifierSerialSession *active_session = nullptr;
 
 bool amplifier_runtime_select(AmpModelId model)
 {
   switch (model) {
     case AmpModelId::SpeExpert1k:
       active_runtime = &spe_expert1k_runtime;
+      active_session = &spe_expert1k_session;
       return true;
     default:
       return false;
@@ -27,6 +31,11 @@ bool amplifier_runtime_select(AmpModelId model)
 AmplifierRuntime *amplifier_runtime_active()
 {
   return active_runtime;
+}
+
+AmplifierSerialSession *amplifier_session_active()
+{
+  return active_session;
 }
 
 AmpModelId amplifier_runtime_active_model_id()
