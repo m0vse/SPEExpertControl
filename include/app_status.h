@@ -13,6 +13,21 @@
 
 static constexpr uint8_t APP_MODEL_DATA_MAX = 16;
 
+struct AppAmpTextStorage {
+    char screen_name[32] = "unknown";
+    char input[8] = "?";
+    char band[12] = "?";
+    char antenna[8] = "?";
+    char cat[8] = "?";
+    char out[8] = "?";
+    char lcd_title[41] = "";
+    char lcd_body[336] = "";
+    char lcd_cells[641] = "";
+    char lcd_attrs[81] = "";
+    char lcd_footer[41] = "";
+    char lcd_hint[100] = "";
+};
+
 struct AppModelData {
     AmpModelId model = AmpModelId::Unknown;
     uint8_t screen_id = 0;
@@ -30,6 +45,10 @@ struct AppStatusSnapshot {
     AppModelData transient_model_data{};
     unsigned long transient_until = 0;
     uint32_t sequence = 0;
+    AppAmpTextStorage amp_text{};
+    AppAmpTextStorage transient_amp_text{};
+    char model_screen_name[32] = "unknown";
+    char transient_model_screen_name[32] = "unknown";
 };
 
 /**

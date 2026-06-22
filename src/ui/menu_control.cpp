@@ -25,7 +25,6 @@ bool MenuController::begin(lv_obj_t **items, int count) {
     for (int i = 0; i < count; ++i) {
         lv_obj_t *it = items[i];
         if (!it || !lv_obj_is_valid(it)) {
-            Serial.println("Invalid menu item, cannot continue");
             return false;
         }
 

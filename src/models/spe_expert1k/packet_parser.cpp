@@ -22,10 +22,10 @@ ExpertPacketParser::Result ExpertPacketParser::read(uint8_t value)
     case State::Len:
       if (value == 0x6a) {
         frame_type_ = value;
-        data_[0] = value;
-        length_ = value;
-        resetState();
-        return Result::ModernRcuFrame;
+        length_ = MODERN_RCU_PAYLOAD_LEN;
+        bytes_ = 0x00;
+        state_ = State::ModernRcuData;
+        break;
       }
       if (value == 1 || value == MAX_DATA || value == EXPERT_PACKET_MAX_LEN) {
         length_ = value;
@@ -34,6 +34,16 @@ ExpertPacketParser::Result ExpertPacketParser::read(uint8_t value)
         resetFromUnexpected(value);
       }
       bytes_ = 0x00;
+      break;
+    case State::ModernRcuData:
+      if (bytes_ < sizeof(data_)) {
+        data_[bytes_] = value;
+      }
+      ++bytes_;
+      if (bytes_ == length_) {
+        resetState();
+        return Result::ModernRcuFrame;
+      }
       break;
     case State::Data:
       data_[bytes_] = value;

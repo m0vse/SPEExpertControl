@@ -52,8 +52,8 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 
 - LVGL 9.5 UI on the Giga Display Shield
 - SPE Expert 1K-FA serial packet parsing and button command transmission
-- Model catalog with runtime detection from amplifier response packets; SPE Expert 1K-FA is active, while the newer RCU LCD frame protocol (`0x6A`) and 1.3K-FA, 1.5K-FA, and 2K-FA status IDs remain reserved for future protocol handlers
-- Placeholder runtime/session classes for the newer SPE protocol family, kept unavailable until protocol support is implemented and tested
+- Generic amplifier bootstrap that sends the shared `0x80` RCU_ON probe and selects the 1K or modern protocol runtime from the first valid response
+- SPE Expert 1K-FA serial packet parsing and preliminary modern SPE RCU LCD frame parsing for the 1.3K-FA, 1.5K-FA, and 2K-FA family
 - Touch control for amplifier buttons and setup menus
 - FreeRTOS split between UI and amplifier serial work
 - Mutex handling around LVGL, amplifier serial, and debug serial access
@@ -71,7 +71,9 @@ Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7
 - `src/display/` - LVGL display and touch adapters for the Arduino Giga Display Shield
 - `src/network/` - lightweight HTTP server for browser control
 - `src/ui/` - LVGL screen construction, UI helpers, WiFi setup popup, and UI assets
-- `src/models/spe_expert1k/` - SPE Expert 1K-FA model-specific menu metadata
+- `src/models/bootstrap/` - generic protocol detection before a model runtime is selected
+- `src/models/spe_expert1k/` - SPE Expert 1K-FA model-specific protocol, status, and menu handling
+- `src/models/spe_modern/` - preliminary modern SPE RCU LCD frame and CSV status handling
 - `include/` - public headers, LVGL declarations, model definitions, and configuration
 - `tools/` - PlatformIO helper scripts and bench-test utilities, including the modern SPE protocol simulator
 - `platformio.ini` - PlatformIO environments and build configuration
@@ -114,7 +116,7 @@ The repository includes a Python simulator for the newer SPE Expert 1.3K-FA, 1.5
 python tools\spe_modern_simulator.py --tcp 127.0.0.1:9901 --ticker 0.5
 ```
 
-See [tools/spe_modern_simulator.md](tools/spe_modern_simulator.md) for serial-port usage, supported commands, and the fixture format.
+See [tools/spe_modern_simulator.md](tools/spe_modern_simulator.md) for serial-port usage, supported commands, and the fixture format. See [docs/modern-protocol-testing.md](docs/modern-protocol-testing.md) for what is simulator-verified and what still requires real amplifier hardware.
 
 ## Serial Console
 
@@ -138,7 +140,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | `web` | - | Print HTTP server counters, including starts, disconnects, client count, request counts, bad key requests, and the last request path/time. |
 | `serial` | `ser` | Print amplifier UART health counters. Use this when checking checksum errors, queue depth, missed packets, or whether the serial task is falling behind. |
 | `amp` | - | Print the last decoded 30-byte amplifier status packet, screen name, DTR state, band, input, antenna, CAT mode, output power setting, power, reflected power, SWR/gain, temperature, PA voltage, and PA current. |
-| `model` | `amp-model` | Print active/saved amplifier model and known model IDs. `model spe_expert_1k` is currently the only selectable runtime; unsupported models are listed but rejected until their protocol runtime exists. |
+| `model` | `amp-model` | Print active/saved amplifier model and known model IDs. Normal operation uses automatic protocol detection; manual model selection is retained for diagnostics and development. |
 | `scan` | - | Run a blocking WiFi scan and print SSID, RSSI, and encryption type for each network. The LCD and web UI continue to use the background WiFi services; this command is mainly for diagnostics. |
 | `stats` | `mem` | Print Mbed runtime statistics: uptime, idle/sleep times, heap usage, stack usage, and RTOS thread state/priority/free stack. |
 | `reboot` | `reset` | Reboot the controller with `NVIC_SystemReset()`. |
@@ -169,6 +171,9 @@ The `serial` command prints amplifier-link counters:
 - `max_queue_depth` and `queued_packets_dropped` - decoded packet queue pressure between serial and UI/status publishing.
 - `max_command_queue_depth` and `queued_commands_dropped` - outbound command queue pressure.
 - `commands_sent` - amplifier commands transmitted.
+- `commands_suppressed` - commands dropped because USB was reserved for the debug console.
+- `last_command_ms` and `last_command_opcode` - timestamp and opcode for the most recent command frame.
+- `modern_refreshes` and `last_modern_refresh_ms` - modern RCU refresh cadence counters used when testing newer amplifiers.
 - `last_checksum_error_ms` - `millis()` timestamp of the last checksum failure.
 - `checksum_sync_resyncs` - checksum failures where the parser also detected sync bytes inside the bad packet.
 - `last_bad_available`, `last_bad_packet_len`, `last_bad_checksum_expected`, and `last_bad_checksum_received` - context for the most recent checksum failure.

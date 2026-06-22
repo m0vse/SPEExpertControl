@@ -38,6 +38,7 @@ public:
   void publish_status() const override;
   bool press_key(const char *name) override;
   bool power_on() override;
+  bool refresh_remote() override;
   bool remote_updates_enabled() const override;
   void process_next_queued_command() override;
   void mark_activity(unsigned long now) override;

@@ -23,8 +23,8 @@ struct SpeExpert1kQueuedPacket {
 struct SpeExpert1kReadResult {
   ExpertPacketParser::Result result = ExpertPacketParser::Result::None;
   Expert_Packet packet{};
-  uint8_t raw[EXPERT_PACKET_MAX_LEN] = {};
-  uint8_t len = 0;
+  uint8_t raw[EXPERT_PACKET_BUFFER_LEN] = {};
+  uint16_t len = 0;
   uint8_t frame_type = 0;
   uint8_t invalid_len = 0;
   uint8_t invalid_expected_checksum = 0;

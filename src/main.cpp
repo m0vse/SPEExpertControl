@@ -16,6 +16,7 @@
 #include "console/serial_console.h"
 #include "display/lvgl_giga_display.h"
 #include "display/lvgl_giga_touch.h"
+#include "display/modern_lcd_canvas.h"
 #include "lvgl.h"
 #include <ui.h>
 #include "amp_dtr.h"
@@ -65,6 +66,8 @@ uint8_t progress = 0;
 #define COUNT_OF(a) ((int)(sizeof(a) / sizeof((a)[0])))
 
 static void handle_amp_session_ui_packet(const AmplifierSessionPacket &packet);
+static void update_generic_amp_lcd_state();
+static const char *wifi_status_label_name(int status);
 void ui_task(void);
 void serial_task(void);
 void console_task(void);
@@ -99,7 +102,8 @@ MenuController setup_baudrate_ctrl;
 static lv_obj_t *setup_baudrate_items[4];
 
 // Amplifier settings
-const unsigned long interval = 1000;
+static constexpr unsigned long SPE_EXPERT1K_RCU_REFRESH_MS = 1000;
+static constexpr unsigned long SPE_MODERN_RCU_REFRESH_MS = 500;
 bool touch_ready = false;
 int transformed_touch_devices = 0;
 static rtos::Mutex lvgl_mutex;
@@ -109,6 +113,45 @@ static rtos::Thread serial_thread(osPriorityHigh, 8192, nullptr, "amp");
 static rtos::Thread console_thread(osPriorityBelowNormal, 4096, nullptr, "console");
 static rtos::Thread wifi_thread(osPriorityNormal, 8192, nullptr, "wifi");
 static rtos::Thread web_thread(osPriorityBelowNormal, 8192, nullptr, "web");
+static bool generic_amp_lcd_ready = false;
+static AmpModelId generic_amp_lcd_model = AmpModelId::Unknown;
+static int generic_amp_lcd_wifi_status = -999;
+static uint32_t generic_amp_lcd_sequence = 0;
+static bool no_amp_lcd_ready = false;
+static int no_amp_lcd_wifi_status = -999;
+
+static void configure_front_panel_button_styles()
+{
+  lv_obj_t *buttons[] = {
+    ui_buttonLowerL, ui_buttonHigherL, ui_buttonLowerC, ui_buttonHigherC, ui_buttonTune,
+    ui_buttonInput, ui_buttonBandDown, ui_buttonBandUp, ui_buttonAnt, ui_buttonLeftUp,
+    ui_buttonRightDown, ui_buttonCat, ui_buttonSet,
+    ui_buttonOff, ui_buttonOn, ui_buttonPower, ui_buttonDisplay, ui_buttonOperate
+  };
+
+  for (lv_obj_t *button : buttons) {
+    if (!button) {
+      continue;
+    }
+    lv_obj_set_style_bg_color(button, lv_color_hex(0xFF5F00), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(button, lv_color_hex(0x111111), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_outline_color(button, lv_color_hex(0xFF5F00), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_outline_width(button, 3, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_outline_pad(button, 1, LV_PART_MAIN | LV_STATE_PRESSED);
+  }
+}
+
+static void update_amp_status_strip(const AmpStatusSnapshot &status)
+{
+  lv_obj_remove_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text_fmt(ui_inLabel, "IN\n%s", status.input ? status.input : "?");
+  lv_label_set_text_fmt(ui_bandLabel, "BAND\n%s", status.band ? status.band : "?");
+  lv_label_set_text_fmt(ui_antLabel, "ANT\n%s", status.antenna ? status.antenna : "?");
+  lv_label_set_text_fmt(ui_catLabel, "CAT\n%s", status.cat ? status.cat : "?");
+  lv_label_set_text_fmt(ui_outLabel, "OUT\n%s", status.out ? status.out : "?");
+  lv_label_set_text_fmt(ui_swrLabel, "SWR\n%s", status.swr);
+  lv_label_set_text_fmt(ui_tempLabel, "TEMP\n%s", status.temp);
+}
 
 class LvglLock {
 public:
@@ -122,6 +165,11 @@ public:
   ~DebugSerialLock() { debug_serial_mutex.unlock(); }
 };
 
+static bool debug_background_logs_enabled()
+{
+  return app_config_amp_serial_port() != AppAmpSerialPort::Usb;
+}
+
 static void process_next_queued_amp_packet()
 {
   if (AmplifierSerialSession *session = amplifier_session_active()) {
@@ -129,8 +177,137 @@ static void process_next_queued_amp_packet()
   }
 }
 
+static void update_generic_amp_lcd_state()
+{
+  AmplifierRuntime *runtime = amplifier_runtime_active();
+  int wifi_status = -1;
+  String wifi_ip;
+#if SPE_ENABLE_WIFI_SETUP || SPE_ENABLE_WEB_SERVER
+  {
+    WifiStackLock wifi_lock;
+    wifi_status = WiFi.status();
+    if (wifi_status == WL_CONNECTED) {
+      wifi_ip = WiFi.localIP().toString();
+    }
+  }
+#endif
+
+  if (!runtime || !runtime->status_valid()) {
+    if (millis() < 15000UL) {
+      return;
+    }
+    if (no_amp_lcd_ready && no_amp_lcd_wifi_status == wifi_status) {
+      return;
+    }
+
+    lv_disp_load_scr(ui_mainScreen);
+    spe_expert1k_hide_status_screens();
+    modern_lcd_canvas_hide();
+    lv_obj_remove_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(ui_status4, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(ui_systemMessageText, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_y(ui_systemMessageText, 110);
+    lv_obj_set_style_text_font(ui_systemMessageText, &ui_font_LCD, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(ui_systemMessageText, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_line_space(ui_systemMessageText, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+#if SPE_ENABLE_WIFI_SETUP || SPE_ENABLE_WEB_SERVER
+    if (wifi_status == WL_CONNECTED) {
+      lv_label_set_text_fmt(ui_systemMessageText,
+                            "NO AMP DETECTED\nWeb: http://%s",
+                            wifi_ip.c_str());
+    } else {
+      lv_label_set_text_fmt(ui_systemMessageText,
+                            "NO AMP DETECTED\nWiFi: %s",
+                            wifi_status_label_name(wifi_status));
+    }
+#else
+    lv_label_set_text(ui_systemMessageText, "NO AMP DETECTED");
+#endif
+    progress = 100;
+    if (ui_startupBar) {
+      lv_bar_set_value(ui_startupBar, progress, LV_ANIM_OFF);
+    }
+    no_amp_lcd_ready = true;
+    no_amp_lcd_wifi_status = wifi_status;
+    generic_amp_lcd_ready = false;
+    return;
+  }
+
+  no_amp_lcd_ready = false;
+  if (runtime->model_id() == AmpModelId::SpeExpert1k) {
+    return;
+  }
+
+  const AmpModelId model = runtime->model_id();
+  const AppStatusSnapshot snapshot = app_status_snapshot();
+  if (generic_amp_lcd_ready && generic_amp_lcd_model == model &&
+      generic_amp_lcd_wifi_status == wifi_status && generic_amp_lcd_sequence == snapshot.sequence) {
+    return;
+  }
+
+#if SPE_ENABLE_WIFI_SETUP
+  wifi_setup_set_visible(false);
+#endif
+  if (!generic_amp_lcd_ready || generic_amp_lcd_model != model) {
+    lv_disp_load_scr(ui_mainScreen);
+    spe_expert1k_hide_status_screens();
+  }
+  lv_obj_remove_flag(ui_systemMessage, LV_OBJ_FLAG_HIDDEN);
+  if (snapshot.amp.lcd_cells && snapshot.amp.lcd_cells[0]) {
+    lv_obj_add_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_status4, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_systemMessageText, LV_OBJ_FLAG_HIDDEN);
+    modern_lcd_canvas_render(snapshot.amp.lcd_cells, snapshot.amp.lcd_attrs);
+  } else if (snapshot.amp.lcd_body && snapshot.amp.lcd_body[0]) {
+    lv_obj_add_flag(ui_ampStatus, LV_OBJ_FLAG_HIDDEN);
+    modern_lcd_canvas_hide();
+    lv_obj_add_flag(ui_status4, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(ui_systemMessageText, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_y(ui_systemMessageText, 12);
+    lv_obj_set_style_text_font(ui_systemMessageText, &ui_font_LCD, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(ui_systemMessageText, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_line_space(ui_systemMessageText, -2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_label_set_text(ui_systemMessageText, snapshot.amp.lcd_body);
+  } else {
+    modern_lcd_canvas_hide();
+    lv_obj_remove_flag(ui_status4, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(ui_systemMessageText, LV_OBJ_FLAG_HIDDEN);
+    update_amp_status_strip(snapshot.amp);
+    lv_obj_set_y(ui_systemMessageText, 110);
+    lv_obj_set_style_text_font(ui_systemMessageText, &ui_font_LCD, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(ui_systemMessageText, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_line_space(ui_systemMessageText, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+#if SPE_ENABLE_WIFI_SETUP || SPE_ENABLE_WEB_SERVER
+    if (wifi_status == WL_CONNECTED) {
+      lv_label_set_text_fmt(ui_systemMessageText,
+                            "%s\nModern protocol detected\nWeb: http://%s",
+                            amp_model_label(model),
+                            wifi_ip.c_str());
+    } else {
+      lv_label_set_text_fmt(ui_systemMessageText,
+                            "%s\nModern protocol detected\nWiFi: %s",
+                            amp_model_label(model),
+                            wifi_status_label_name(wifi_status));
+    }
+#else
+    lv_label_set_text_fmt(ui_systemMessageText, "%s\nModern protocol detected", amp_model_label(model));
+#endif
+  }
+  progress = 100;
+  if (ui_startupBar) {
+    lv_bar_set_value(ui_startupBar, progress, LV_ANIM_OFF);
+  }
+  generic_amp_lcd_ready = true;
+  generic_amp_lcd_model = model;
+  generic_amp_lcd_wifi_status = wifi_status;
+  generic_amp_lcd_sequence = snapshot.sequence;
+}
+
 static void boot_log(const __FlashStringHelper *message)
 {
+  if (!debug_background_logs_enabled()) {
+    return;
+  }
   Serial.println(message);
   Serial.flush();
 }
@@ -142,6 +319,9 @@ static void boot_led_set(uint8_t pin, bool on)
 
 static void boot_stage(uint8_t stage, const __FlashStringHelper *message)
 {
+  if (!debug_background_logs_enabled()) {
+    return;
+  }
   Serial.print(F("Boot stage "));
   Serial.print(stage);
   Serial.print(F(": "));
@@ -209,15 +389,12 @@ static void print_wifi_status()
   String ssid;
   IPAddress ip;
   long rssi = 0;
-  {
-    WifiStackLock wifi_lock;
-    status = WiFi.status();
-    firmware = WiFi.firmwareVersion();
-    if (status == WL_CONNECTED) {
-      ssid = WiFi.SSID();
-      ip = WiFi.localIP();
-      rssi = WiFi.RSSI();
-    }
+  status = WiFi.status();
+  firmware = WiFi.firmwareVersion();
+  if (status == WL_CONNECTED) {
+    ssid = WiFi.SSID();
+    ip = WiFi.localIP();
+    rssi = WiFi.RSSI();
   }
   const bool setup_connected =
 #if SPE_ENABLE_WIFI_SETUP
@@ -310,6 +487,16 @@ static void print_serial_status()
   Serial.println(snapshot.queued_commands_dropped);
   Serial.print(F("  commands_sent="));
   Serial.println(snapshot.commands_sent);
+  Serial.print(F("  commands_suppressed="));
+  Serial.println(snapshot.commands_suppressed);
+  Serial.print(F("  last_command_ms="));
+  Serial.println(snapshot.last_command_ms);
+  Serial.print(F("  last_command_opcode=0x"));
+  Serial.println(snapshot.last_command_opcode, HEX);
+  Serial.print(F("  modern_refreshes="));
+  Serial.println(snapshot.modern_refreshes);
+  Serial.print(F("  last_modern_refresh_ms="));
+  Serial.println(snapshot.last_modern_refresh_ms);
   Serial.print(F("  last_checksum_error_ms="));
   Serial.println(snapshot.last_checksum_error_ms);
   Serial.print(F("  checksum_sync_resyncs="));
@@ -512,6 +699,22 @@ static void print_runtime_stats()
     Serial.println(F("  thread list may be truncated"));
   }
 }
+
+static const char *wifi_status_label_name(int status)
+{
+  switch (status) {
+    case WL_IDLE_STATUS: return "idle";
+    case WL_NO_SSID_AVAIL: return "no_ssid";
+    case WL_SCAN_COMPLETED: return "scan_completed";
+    case WL_CONNECTED: return "connected";
+    case WL_CONNECT_FAILED: return "connect_failed";
+    case WL_CONNECTION_LOST: return "connection_lost";
+    case WL_DISCONNECTED: return "disconnected";
+    case WL_NO_MODULE: return "no_module";
+    default: return "unknown";
+  }
+}
+
 
 static void reboot_controller()
 {
@@ -847,7 +1050,9 @@ static void print_console_poll_status(unsigned long now)
 }
 
 void setup() {
-  Serial.begin(115200); // Debug logging
+  app_config_load();
+  const bool usb_amp_serial = app_config_amp_serial_port() == AppAmpSerialPort::Usb;
+  Serial.begin(usb_amp_serial ? app_config_amp_baud() : 115200);
   pinMode(LEDR, OUTPUT);
   pinMode(LEDG, OUTPUT);
   pinMode(LEDB, OUTPUT);
@@ -861,9 +1066,11 @@ void setup() {
   }
 
   boot_log(F("Boot: serial ready"));
-  Serial.print(F("SPE bring-up level "));
-  Serial.println(SPE_BRINGUP_LEVEL);
-  Serial.flush();
+  if (debug_background_logs_enabled()) {
+    Serial.print(F("SPE bring-up level "));
+    Serial.println(SPE_BRINGUP_LEVEL);
+    Serial.flush();
+  }
 
 #if SPE_BRINGUP_LEVEL == 0
   boot_log(F("Stable baseline: display, touch, UI, WiFi and amp serial disabled"));
@@ -872,15 +1079,16 @@ void setup() {
 #endif
 
 #if SPE_BRINGUP_LEVEL >= 1
-  app_config_load();
   amplifier_runtime_select_bootstrap_detector();
   amp_control_bind_runtime(amplifier_runtime_active());
   giga_lvgl_display_set_flipped(app_config_display_flipped());
   boot_stage(1, F("display begin"));
   int display_status = giga_lvgl_display_begin();
-  Serial.print(F("Boot: display status "));
-  Serial.println(display_status);
-  Serial.flush();
+  if (debug_background_logs_enabled()) {
+    Serial.print(F("Boot: display status "));
+    Serial.println(display_status);
+    Serial.flush();
+  }
   if (display_status != 0) {
     boot_log(F("Boot: display init failed; stopping before LVGL UI"));
     boot_led_set(LEDR, true);
@@ -897,15 +1105,19 @@ void setup() {
   boot_stage(4, F("touch begin"));
   touch_ready = TouchDetector.begin();
   transformed_touch_devices = giga_lvgl_touch_use_display_rotation(TouchDetector);
-  Serial.print(F("Boot: touch status "));
-  Serial.println(touch_ready ? F("ok") : F("failed"));
-  Serial.print(F("Boot: transformed touch devices "));
-  Serial.println(transformed_touch_devices);
+  if (debug_background_logs_enabled()) {
+    Serial.print(F("Boot: touch status "));
+    Serial.println(touch_ready ? F("ok") : F("failed"));
+    Serial.print(F("Boot: transformed touch devices "));
+    Serial.println(transformed_touch_devices);
+  }
 #endif
 
 #if SPE_BRINGUP_LEVEL >= 3
   boot_stage(5, F("ui init"));
   ui_init();
+  configure_front_panel_button_styles();
+  modern_lcd_canvas_create(ui_systemMessage);
 #endif
 
 #if SPE_BRINGUP_LEVEL >= 4
@@ -915,12 +1127,12 @@ void setup() {
 
 #if SPE_BRINGUP_LEVEL >= 5
   boot_stage(7, F("serial1 begin"));
-  if (AmplifierSerialSession *session = amplifier_session_active()) {
-    session->begin();
-  }
+  amplifier_runtime_begin_active_session();
 #endif
 
-  Serial.println(F("Starting Expert1K controller"));
+  if (debug_background_logs_enabled()) {
+    Serial.println(F("Starting Expert1K controller"));
+  }
 
 #if SPE_BRINGUP_LEVEL >= 4
   // Setup options menu items (must be done after ui_init())
@@ -1047,6 +1259,7 @@ void ui_task()
 #if SPE_ENABLE_WIFI_SETUP && SPE_BRINGUP_LEVEL >= 4
       wifi_setup_service();
 #endif
+      update_generic_amp_lcd_state();
     }
 #endif
 
@@ -1059,6 +1272,7 @@ void serial_task()
 {
   uint32_t last_run_ms = millis();
   bool last_usb_console_active = false;
+  bool startup_probe_sent = false;
   while (true) {
     AmplifierSerialSession *session = amplifier_session_active();
     const bool usb_console_active = session && session->usb_console_active();
@@ -1078,14 +1292,25 @@ void serial_task()
     const uint32_t now_ms = millis();
     serial_transport_note_task_gap(now_ms - last_run_ms);
     last_run_ms = now_ms;
-    bool completed_packet = session && session->service_rx(amplifier_runtime_active());
+    if (session) {
+      session->service_rx(amplifier_runtime_active());
+    }
 
     // Keep the amplifier remote-control stream alive if no status packets arrive.
     unsigned long now = millis();
     AmplifierRuntime *runtime = amplifier_runtime_active();
-    if (amp_control_remote_updates_enabled() && runtime && runtime->should_send_keepalive(now, interval)) {
+    if (!startup_probe_sent && runtime && amp_control_remote_updates_enabled()) {
       amp_control_power_on();
-      completed_packet = true;
+      runtime->note_keepalive(now);
+      startup_probe_sent = true;
+    }
+    const unsigned long refresh_interval =
+      runtime && runtime->model_id() != AmpModelId::SpeExpert1k ? SPE_MODERN_RCU_REFRESH_MS : SPE_EXPERT1K_RCU_REFRESH_MS;
+    if (amp_control_remote_updates_enabled() && runtime && runtime->should_send_keepalive(now, refresh_interval)) {
+      if (runtime->model_id() != AmpModelId::SpeExpert1k && runtime->model_id() != AmpModelId::Unknown) {
+        serial_transport_note_modern_refresh();
+      }
+      amp_control_refresh_remote();
       runtime->note_keepalive(now);
       if (progress < 100) {
         progress++;
@@ -1096,9 +1321,7 @@ void serial_task()
       }
     }
 
-    if (completed_packet) {
-      amp_control_process_next_queued_command();
-    }
+    amp_control_process_next_queued_command();
     rtos::ThisThread::sleep_for(1ms);
   }
 }
@@ -1130,15 +1353,7 @@ void web_task()
   rtos::ThisThread::sleep_for(3s);
   while (true) {
 #if SPE_ENABLE_WEB_SERVER && SPE_BRINGUP_LEVEL >= 5
-    #if SPE_ENABLE_WIFI_SETUP
-    if (wifi_setup_is_connected()) {
-      control_server_service();
-    } else {
-      rtos::ThisThread::sleep_for(250ms);
-    }
-    #else
     control_server_service();
-    #endif
 #endif
     rtos::ThisThread::sleep_for(5ms);
   }

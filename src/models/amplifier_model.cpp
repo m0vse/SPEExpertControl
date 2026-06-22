@@ -13,10 +13,10 @@
 
 static const AmpModelInfo MODEL_CATALOG[] = {
     {AmpModelId::SpeExpert1k, "spe_expert_1k", "SPE Expert 1K-FA", true},
-    {AmpModelId::SpeModern, "spe_modern", "SPE Expert modern protocol", false},
-    {AmpModelId::SpeExpert13k, "spe_expert_13k", "SPE Expert 1.3K-FA", false},
-    {AmpModelId::SpeExpert15k, "spe_expert_15k", "SPE Expert 1.5K-FA", false},
-    {AmpModelId::SpeExpert2k, "spe_expert_2k", "SPE Expert 2K-FA", false},
+    {AmpModelId::SpeModern, "spe_modern", "SPE Expert modern protocol", true},
+    {AmpModelId::SpeExpert13k, "spe_expert_13k", "SPE Expert 1.3K-FA", true},
+    {AmpModelId::SpeExpert15k, "spe_expert_15k", "SPE Expert 1.5K-FA", true},
+    {AmpModelId::SpeExpert2k, "spe_expert_2k", "SPE Expert 2K-FA", true},
 };
 
 const AmpModelInfo *amp_model_catalog(uint8_t &count)
@@ -91,7 +91,7 @@ bool amp_model_parse(const char *value, AmpModelId &id)
     return false;
 }
 
-static bool packet_has_modern_id_at(const uint8_t *data, uint8_t len, uint8_t offset, const char *id)
+static bool packet_has_modern_id_at(const uint8_t *data, uint16_t len, uint8_t offset, const char *id)
 {
     return data && len >= offset + 3 &&
            data[offset] == static_cast<uint8_t>(id[0]) &&
@@ -99,7 +99,7 @@ static bool packet_has_modern_id_at(const uint8_t *data, uint8_t len, uint8_t of
            data[offset + 2] == static_cast<uint8_t>(id[2]);
 }
 
-AmpModelId amp_model_detect_from_packet(const uint8_t *data, uint8_t len)
+AmpModelId amp_model_detect_from_packet(const uint8_t *data, uint16_t len)
 {
     if (!data) {
         return AmpModelId::Unknown;
@@ -109,7 +109,7 @@ AmpModelId amp_model_detect_from_packet(const uint8_t *data, uint8_t len)
         return AmpModelId::SpeExpert1k;
     }
 
-    if (len == 0x6a && data[0] == 0x6a) {
+    if (len == 367) {
         return AmpModelId::SpeModern;
     }
 

@@ -16,9 +16,8 @@ class SpeExpert1kRuntime;
 /**
  * Select the active runtime implementation for an amplifier model.
  *
- * Only the SPE Expert 1K-FA runtime is currently implemented. Unsupported
- * model IDs are rejected by returning false and leaving the current runtime
- * unchanged.
+ * Unsupported model IDs are rejected by returning false and leaving the current
+ * runtime unchanged.
  */
 bool amplifier_runtime_select(AmpModelId model);
 
@@ -26,6 +25,7 @@ bool amplifier_runtime_select(AmpModelId model);
  * Select the startup session used to detect the amplifier protocol.
  */
 bool amplifier_runtime_select_bootstrap_detector();
+void amplifier_runtime_begin_active_session();
 void amplifier_runtime_note_detected_model(AmpModelId model);
 
 /**

@@ -8,6 +8,7 @@
 #include "network/control_server.h"
 
 #include "amp_control.h"
+#include "app_config.h"
 #include "app_status.h"
 #include "network/control_page.h"
 #include "network/spe_logo_svg.h"
@@ -33,6 +34,11 @@ struct ControlServerStats {
 static rtos::Mutex stats_mutex;
 static ControlServerStats stats;
 
+static bool debug_background_logs_enabled()
+{
+    return app_config_amp_serial_port() != AppAmpSerialPort::Usb;
+}
+
 static void updateStats(void (*update)(ControlServerStats &))
 {
     stats_mutex.lock();
@@ -50,6 +56,42 @@ static void recordRequest(const char *path)
     stats_mutex.unlock();
 }
 
+class StringPrint : public Print {
+public:
+    explicit StringPrint(String &out) : out_(out) {}
+
+    size_t write(uint8_t value) override
+    {
+        out_ += static_cast<char>(value);
+        return 1;
+    }
+
+    size_t write(const uint8_t *buffer, size_t size) override
+    {
+        if (!buffer) {
+            return 0;
+        }
+        out_.concat(reinterpret_cast<const char *>(buffer), size);
+        return size;
+    }
+
+private:
+    String &out_;
+};
+
+static void appendJsonString(String &out, const String &value)
+{
+    out += '"';
+    for (size_t i = 0; i < value.length(); ++i) {
+        const char c = value[i];
+        if (c == '"' || c == '\\') {
+            out += '\\';
+        }
+        out += c;
+    }
+    out += '"';
+}
+
 class ControlServer {
 public:
     void service()
@@ -60,10 +102,11 @@ public:
                 updateStats([](ControlServerStats &s) { ++s.wifi_disconnects; });
             }
             last_wifi_status_ = wifi_status;
+            started_ = false;
             return;
         }
 
-        if (last_wifi_status_ != WL_CONNECTED) {
+        if (last_wifi_status_ != WL_CONNECTED || !started_) {
             printWifiStatus();
             last_wifi_status_ = wifi_status;
             begin();
@@ -87,11 +130,16 @@ private:
         server_.begin();
         started_ = true;
         updateStats([](ControlServerStats &s) { ++s.server_starts; });
-        Serial.println(F("HTTP control server started"));
+        if (debug_background_logs_enabled()) {
+            Serial.println(F("HTTP control server started"));
+        }
     }
 
     void printWifiStatus()
     {
+        if (!debug_background_logs_enabled()) {
+            return;
+        }
         IPAddress ip = WiFi.localIP();
         Serial.print(F("WiFi connected: "));
         Serial.println(WiFi.SSID());
@@ -109,7 +157,7 @@ private:
         String request_line;
         const unsigned long started = millis();
 
-        while (client.connected() && millis() - started < 1000) {
+        while (client.connected() && millis() - started < 120) {
             if (!client.available()) {
                 delay(1);
                 continue;
@@ -159,26 +207,22 @@ private:
             sendIndex(client);
         }
 
-        client.flush();
-        delay(1);
         client.stop();
     }
 
     void sendStatusJson(WiFiClient &client)
     {
+        String body;
+        body.reserve(2300);
+        appendStatusJson(body, false, "");
+
         client.println(F("HTTP/1.1 200 OK"));
         client.println(F("Content-Type: application/json"));
+        client.print(F("Content-Length: "));
+        client.println(body.length());
         client.println(F("Connection: close"));
         client.println();
-        client.print(F("{\"wifi\":{\"status\":\"connected\",\"ssid\":\""));
-        client.print(WiFi.SSID());
-        client.print(F("\",\"ip\":\""));
-        client.print(WiFi.localIP());
-        client.print(F("\",\"rssi\":"));
-        client.print(WiFi.RSSI());
-        client.print(F("},\"amp\":"));
-        app_status_print_json(client);
-        client.println(F("}"));
+        client.print(body);
     }
 
     void sendLogo(WiFiClient &client)
@@ -205,34 +249,48 @@ private:
         const bool ok = amp_control_press_key(name.c_str());
         if (!ok) {
             updateStats([](ControlServerStats &s) { ++s.bad_key_requests; });
-        } else {
-            const unsigned long wait_started = millis();
-            while (millis() - wait_started < 900 && app_status_sequence() == start_sequence) {
-                rtos::ThisThread::sleep_for(std::chrono::milliseconds(20));
-            }
         }
+        (void)start_sequence;
+        String body;
+        body.reserve(2350);
+        appendStatusJson(body, true, name, ok);
+
         client.println(ok ? F("HTTP/1.1 200 OK") : F("HTTP/1.1 400 Bad Request"));
         client.println(F("Content-Type: application/json"));
+        client.print(F("Content-Length: "));
+        client.println(body.length());
         client.println(F("Connection: close"));
         client.println();
-        client.print(F("{\"ok\":"));
-        client.print(ok ? F("true") : F("false"));
-        client.print(F(",\"key\":\""));
-        client.print(name);
-        client.print(F("\",\"wifi\":{\"status\":\"connected\",\"ssid\":\""));
-        client.print(WiFi.SSID());
-        client.print(F("\",\"ip\":\""));
-        client.print(WiFi.localIP());
-        client.print(F("\",\"rssi\":"));
-        client.print(WiFi.RSSI());
-        client.print(F("},\"amp\":"));
-        app_status_print_json(client);
-        client.println(F("}"));
+        client.print(body);
     }
 
     void sendIndex(WiFiClient &client)
     {
         control_page_send(client);
+    }
+
+    void appendStatusJson(String &body, bool include_key, const String &key, bool ok = true)
+    {
+        if (include_key) {
+            body += F("{\"ok\":");
+            body += ok ? F("true") : F("false");
+            body += F(",\"key\":");
+            appendJsonString(body, key);
+            body += ',';
+        } else {
+            body += '{';
+        }
+
+        body += F("\"wifi\":{\"status\":\"connected\",\"ssid\":");
+        appendJsonString(body, WiFi.SSID());
+        body += F(",\"ip\":");
+        appendJsonString(body, WiFi.localIP().toString());
+        body += F(",\"rssi\":");
+        body += WiFi.RSSI();
+        body += F("},\"amp\":");
+        StringPrint body_print(body);
+        app_status_print_json(body_print);
+        body += '}';
     }
 
     WiFiServer server_{80};

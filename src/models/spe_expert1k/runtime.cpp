@@ -118,6 +118,11 @@ bool SpeExpert1kRuntime::power_on()
   return send_command({Rcu_On});
 }
 
+bool SpeExpert1kRuntime::refresh_remote()
+{
+  return power_on();
+}
+
 bool SpeExpert1kRuntime::remote_updates_enabled() const
 {
   return remote_update_enabled_;

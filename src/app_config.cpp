@@ -37,14 +37,11 @@ static bool config_storage_mount(mbed::BlockDevice *&root, mbed::MBRBlockDevice 
 {
     root = mbed::BlockDevice::get_default_instance();
     if (!root) {
-        Serial.println("Config: no default block device");
         return false;
     }
 
     int err = root->init();
     if (err) {
-        Serial.print("Config: QSPI init failed ");
-        Serial.println(err);
         return false;
     }
 
@@ -53,14 +50,11 @@ static bool config_storage_mount(mbed::BlockDevice *&root, mbed::MBRBlockDevice 
 
     err = settings_fs->mount(settings_partition);
     if (err) {
-        Serial.println("Config: creating QSPI partition 2");
         mbed::MBRBlockDevice::partition(root, 2, 0x0B, 1 * 1024 * 1024, 6 * 1024 * 1024);
         err = settings_fs->reformat(settings_partition);
     }
 
     if (err) {
-        Serial.print("Config: filesystem mount failed ");
-        Serial.println(err);
         delete settings_fs;
         delete settings_partition;
         settings_fs = nullptr;
@@ -157,7 +151,6 @@ bool app_config_save(void)
     bool saved = false;
     FILE *fp = fopen(APP_CONFIG_PATH, "w");
     if (!fp) {
-        Serial.println("Config: failed to open settings file for write");
     } else {
         fprintf(fp, "ssid=%s\n", snapshot.wifi_ssid);
         fprintf(fp, "password=%s\n", snapshot.wifi_password);

@@ -23,6 +23,7 @@ public:
   virtual void publish_status() const = 0;
   virtual bool press_key(const char *name) = 0;
   virtual bool power_on() = 0;
+  virtual bool refresh_remote() = 0;
   virtual bool remote_updates_enabled() const = 0;
   virtual void process_next_queued_command() = 0;
   virtual void mark_activity(unsigned long now) = 0;

@@ -31,7 +31,7 @@ const char *amp_model_key(AmpModelId id);
 const char *amp_model_label(AmpModelId id);
 bool amp_model_available(AmpModelId id);
 bool amp_model_parse(const char *value, AmpModelId &id);
-AmpModelId amp_model_detect_from_packet(const uint8_t *data, uint8_t len);
+AmpModelId amp_model_detect_from_packet(const uint8_t *data, uint16_t len);
 
 struct AmpMeterSnapshot {
     const char *label = "";
@@ -58,6 +58,12 @@ struct AmpStatusSnapshot {
     const char *out = "?";
     char swr[8] = "--.--";
     char temp[12] = "?";
+    const char *lcd_title = "";
+    const char *lcd_body = "";
+    const char *lcd_cells = "";
+    const char *lcd_attrs = "";
+    const char *lcd_footer = "";
+    const char *lcd_hint = "";
     float power = 0.0f;
     float reverse = 0.0f;
     float voltage = 0.0f;

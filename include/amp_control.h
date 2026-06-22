@@ -30,6 +30,13 @@ bool amp_control_press_key(const char *name);
 bool amp_control_power_on();
 
 /**
+ * Queue the periodic remote-control refresh command sequence.
+ *
+ * @return true when the refresh commands were queued.
+ */
+bool amp_control_refresh_remote();
+
+/**
  * @return true while automatic RCU_ON keepalive polling should continue.
  */
 bool amp_control_remote_updates_enabled();

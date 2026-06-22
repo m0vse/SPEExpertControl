@@ -21,6 +21,11 @@ bool amp_control_power_on()
   return active_runtime ? active_runtime->power_on() : false;
 }
 
+bool amp_control_refresh_remote()
+{
+  return active_runtime ? active_runtime->refresh_remote() : false;
+}
+
 bool amp_control_remote_updates_enabled()
 {
   return active_runtime ? active_runtime->remote_updates_enabled() : false;

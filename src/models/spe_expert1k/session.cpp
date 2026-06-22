@@ -73,7 +73,7 @@ bool SpeExpert1kSerialSession::service_rx(AmplifierRuntime *runtime)
             runtime->mark_activity(millis());
           }
         } else {
-          const AmplifierSessionPacket packet{&read_result.packet, read_result.len};
+          const AmplifierSessionPacket packet{&read_result.packet, static_cast<uint8_t>(read_result.len)};
           process_response_packet(packet);
         }
         break;
@@ -120,6 +120,9 @@ bool SpeExpert1kSerialSession::process_next_ui_packet(AmplifierSessionPacketHand
 void SpeExpert1kSerialSession::process_response_packet(const AmplifierSessionPacket &packet) const
 {
   if (!packet.data || packet.len != 1) {
+    return;
+  }
+  if (spe_expert1k_amp_uses_usb_serial() && !spe_expert1k_usb_console_active()) {
     return;
   }
 

@@ -82,10 +82,27 @@ void serial_transport_note_invalid_checksum(uint8_t len, uint8_t expected, uint8
   stats.last_bad_checksum_received = received;
 }
 
-void serial_transport_note_command()
+void serial_transport_note_command(uint8_t opcode)
 {
   StatsLock lock;
   ++stats.commands_sent;
+  stats.last_command_ms = millis();
+  stats.last_command_opcode = opcode;
+}
+
+void serial_transport_note_command_suppressed(uint8_t opcode)
+{
+  StatsLock lock;
+  ++stats.commands_suppressed;
+  stats.last_command_ms = millis();
+  stats.last_command_opcode = opcode;
+}
+
+void serial_transport_note_modern_refresh()
+{
+  StatsLock lock;
+  ++stats.modern_refreshes;
+  stats.last_modern_refresh_ms = millis();
 }
 
 void serial_transport_note_packet_drop()

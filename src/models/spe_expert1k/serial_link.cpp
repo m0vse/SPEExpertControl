@@ -121,9 +121,10 @@ static void send_command_frame(const uint8_t *cmd, uint8_t len)
 {
   SerialLock lock;
   if (amp_serial_is_usb() && usb_console_active) {
+    serial_transport_note_command_suppressed(len > 0 ? cmd[0] : 0);
     return;
   }
-  serial_transport_note_command();
+  serial_transport_note_command(len > 0 ? cmd[0] : 0);
   Stream &port = amp_serial_port();
   port.write(0x55);
   port.write(0x55);
@@ -136,6 +137,7 @@ static void send_command_frame(const uint8_t *cmd, uint8_t len)
     sum += c;
   }
   port.write(sum);
+  port.flush();
 
 #if SPE_VERBOSE_PACKET_LOG
   Serial.print(F("TX command:"));
@@ -215,7 +217,7 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   if (result.result == ExpertPacketParser::Result::PacketReady) {
     memcpy(result.raw, parser.data(), result.len);
   } else if (result.result == ExpertPacketParser::Result::ModernRcuFrame) {
-    result.raw[0] = result.frame_type;
+    memcpy(result.raw, parser.data(), result.len);
   }
   result.invalid_len = parser.invalidLength();
   result.invalid_expected_checksum = parser.invalidExpectedChecksum();

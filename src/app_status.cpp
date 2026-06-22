@@ -8,11 +8,69 @@
 #include "app_status.h"
 
 #include <rtos.h>
+#include <string.h>
 
 #define COUNT_OF_LOCAL(a) (sizeof(a) / sizeof((a)[0]))
 
 static rtos::Mutex status_mutex;
 static AppStatusSnapshot published;
+
+static void copy_text(char *dst, size_t dst_len, const char *src)
+{
+    if (!dst || dst_len == 0) {
+        return;
+    }
+    if (!src) {
+        src = "";
+    }
+    strncpy(dst, src, dst_len - 1);
+    dst[dst_len - 1] = '\0';
+}
+
+static void copy_amp_text(AppAmpTextStorage &storage, const AmpStatusSnapshot &amp)
+{
+    copy_text(storage.screen_name, sizeof(storage.screen_name), amp.screen_name);
+    copy_text(storage.input, sizeof(storage.input), amp.input);
+    copy_text(storage.band, sizeof(storage.band), amp.band);
+    copy_text(storage.antenna, sizeof(storage.antenna), amp.antenna);
+    copy_text(storage.cat, sizeof(storage.cat), amp.cat);
+    copy_text(storage.out, sizeof(storage.out), amp.out);
+    copy_text(storage.lcd_title, sizeof(storage.lcd_title), amp.lcd_title);
+    copy_text(storage.lcd_body, sizeof(storage.lcd_body), amp.lcd_body);
+    copy_text(storage.lcd_cells, sizeof(storage.lcd_cells), amp.lcd_cells);
+    copy_text(storage.lcd_attrs, sizeof(storage.lcd_attrs), amp.lcd_attrs);
+    copy_text(storage.lcd_footer, sizeof(storage.lcd_footer), amp.lcd_footer);
+    copy_text(storage.lcd_hint, sizeof(storage.lcd_hint), amp.lcd_hint);
+}
+
+static void bind_amp_text(AmpStatusSnapshot &amp, AppAmpTextStorage &storage)
+{
+    amp.screen_name = storage.screen_name;
+    amp.input = storage.input;
+    amp.band = storage.band;
+    amp.antenna = storage.antenna;
+    amp.cat = storage.cat;
+    amp.out = storage.out;
+    amp.lcd_title = storage.lcd_title;
+    amp.lcd_body = storage.lcd_body;
+    amp.lcd_cells = storage.lcd_cells;
+    amp.lcd_attrs = storage.lcd_attrs;
+    amp.lcd_footer = storage.lcd_footer;
+    amp.lcd_hint = storage.lcd_hint;
+}
+
+static void copy_model_text(char *dst, size_t dst_len, const AppModelData &model_data)
+{
+    copy_text(dst, dst_len, model_data.screen_name);
+}
+
+static void bind_snapshot_text(AppStatusSnapshot &snapshot)
+{
+    bind_amp_text(snapshot.amp, snapshot.amp_text);
+    bind_amp_text(snapshot.transient_amp, snapshot.transient_amp_text);
+    snapshot.model_data.screen_name = snapshot.model_screen_name;
+    snapshot.transient_model_data.screen_name = snapshot.transient_model_screen_name;
+}
 
 static void json_print_string(Print &out, const char *value)
 {
@@ -21,8 +79,14 @@ static void json_print_string(Print &out, const char *value)
         for (const char *p = value; *p; ++p) {
             if (*p == '"' || *p == '\\') {
                 out.print('\\');
+                out.print(*p);
+            } else if (*p == '\n') {
+                out.print(F("\\n"));
+            } else if (*p == '\r') {
+                out.print(F("\\r"));
+            } else {
+                out.print(*p);
             }
-            out.print(*p);
         }
     }
     out.print('"');
@@ -31,8 +95,16 @@ static void json_print_string(Print &out, const char *value)
 void app_status_publish(const AppStatusSnapshot &snapshot)
 {
     status_mutex.lock();
+    const uint32_t next_sequence = published.sequence + 1;
     published = snapshot;
-    ++published.sequence;
+    copy_amp_text(published.amp_text, snapshot.amp);
+    copy_amp_text(published.transient_amp_text, snapshot.transient_amp);
+    copy_model_text(published.model_screen_name, sizeof(published.model_screen_name), snapshot.model_data);
+    copy_model_text(published.transient_model_screen_name,
+                    sizeof(published.transient_model_screen_name),
+                    snapshot.transient_model_data);
+    bind_snapshot_text(published);
+    published.sequence = next_sequence;
     status_mutex.unlock();
 }
 
@@ -41,6 +113,7 @@ AppStatusSnapshot app_status_snapshot(void)
     status_mutex.lock();
     AppStatusSnapshot snapshot = published;
     status_mutex.unlock();
+    bind_snapshot_text(snapshot);
     return snapshot;
 }
 
@@ -103,6 +176,18 @@ void app_status_print_json(Print &out)
     json_print_string(out, amp.swr);
     out.print(F(",\"temp\":"));
     json_print_string(out, amp.temp);
+    out.print(F(",\"lcdTitle\":"));
+    json_print_string(out, amp.lcd_title);
+    out.print(F(",\"lcdBody\":"));
+    json_print_string(out, amp.lcd_body);
+    out.print(F(",\"lcdCells\":"));
+    json_print_string(out, amp.lcd_cells);
+    out.print(F(",\"lcdAttrs\":"));
+    json_print_string(out, amp.lcd_attrs);
+    out.print(F(",\"lcdFooter\":"));
+    json_print_string(out, amp.lcd_footer);
+    out.print(F(",\"lcdHint\":"));
+    json_print_string(out, amp.lcd_hint);
     out.print(F(",\"voltage\":"));
     out.print(amp.voltage, 1);
     out.print(F(",\"current\":"));

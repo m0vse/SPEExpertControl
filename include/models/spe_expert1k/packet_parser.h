@@ -11,6 +11,8 @@
 #include "models/spe_expert1k/expertpackets.h"
 
 static const uint8_t EXPERT_PACKET_MAX_LEN = 67;
+static const uint16_t MODERN_RCU_PAYLOAD_LEN = 367;
+static const uint16_t EXPERT_PACKET_BUFFER_LEN = MODERN_RCU_PAYLOAD_LEN;
 
 class ExpertPacketParser {
 public:
@@ -25,7 +27,7 @@ public:
 
   const Expert_Packet &packet() const { return packet_; }
   const uint8_t *data() const { return data_; }
-  uint8_t length() const { return length_; }
+  uint16_t length() const { return length_; }
   uint8_t invalidLength() const { return invalid_length_; }
   uint8_t invalidExpectedChecksum() const { return invalid_expected_checksum_; }
   uint8_t invalidReceivedChecksum() const { return invalid_received_checksum_; }
@@ -36,6 +38,7 @@ private:
     Sync,
     Len,
     Data,
+    ModernRcuData,
     Sum,
     SumHi,
     Cr,
@@ -48,12 +51,12 @@ private:
 
   State state_ = State::Sync;
   Expert_Packet packet_{};
-  uint8_t data_[EXPERT_PACKET_MAX_LEN] = {};
-  uint8_t bytes_ = 0x00;
+  uint8_t data_[EXPERT_PACKET_BUFFER_LEN] = {};
+  uint16_t bytes_ = 0x00;
   uint16_t checksum_ = 0x00;
   uint8_t checksum_lo_ = 0x00;
   uint8_t frame_type_ = 0x00;
-  uint8_t length_ = 0x00;
+  uint16_t length_ = 0x00;
   uint8_t invalid_length_ = 0x00;
   uint8_t invalid_expected_checksum_ = 0x00;
   uint8_t invalid_received_checksum_ = 0x00;
