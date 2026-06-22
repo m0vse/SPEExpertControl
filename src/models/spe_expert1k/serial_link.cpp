@@ -39,7 +39,7 @@ static ExpertPacketParser parser;
 static uint32_t last_available = 0;
 static uint8_t usb_escape_count = 0;
 static bool usb_console_active = false;
-static bool amp_serial_usb = false;
+static AppAmpSerialPort amp_serial_port_selection = AppAmpSerialPort::Uart1;
 static uint32_t amp_baud = APP_CONFIG_DEFAULT_AMP_BAUD;
 
 class SerialLock {
@@ -62,10 +62,40 @@ public:
 
 static Stream &amp_serial_port()
 {
-  if (amp_serial_usb) {
-    return Serial;
+  switch (amp_serial_port_selection) {
+    case AppAmpSerialPort::Uart1: return Serial1;
+    case AppAmpSerialPort::Uart2: return Serial2;
+    case AppAmpSerialPort::Uart3: return Serial3;
+    case AppAmpSerialPort::Uart4: return Serial4;
+    case AppAmpSerialPort::Usb: return Serial;
+    default: return Serial1;
   }
-  return Serial1;
+}
+
+static bool amp_serial_is_usb()
+{
+  return amp_serial_port_selection == AppAmpSerialPort::Usb;
+}
+
+static void begin_uart_port(uint32_t baud)
+{
+  switch (amp_serial_port_selection) {
+    case AppAmpSerialPort::Uart1:
+      Serial1.begin(baud);
+      break;
+    case AppAmpSerialPort::Uart2:
+      Serial2.begin(baud);
+      break;
+    case AppAmpSerialPort::Uart3:
+      Serial3.begin(baud);
+      break;
+    case AppAmpSerialPort::Uart4:
+      Serial4.begin(baud);
+      break;
+    case AppAmpSerialPort::Usb:
+    default:
+      break;
+  }
 }
 
 static bool dequeue_command(QueuedAmpCommand &queued)
@@ -84,7 +114,7 @@ static bool dequeue_command(QueuedAmpCommand &queued)
 static void send_command_frame(const uint8_t *cmd, uint8_t len)
 {
   SerialLock lock;
-  if (amp_serial_usb && usb_console_active) {
+  if (amp_serial_is_usb() && usb_console_active) {
     return;
   }
   serial_transport_note_command();
@@ -114,19 +144,19 @@ static void send_command_frame(const uint8_t *cmd, uint8_t len)
 void spe_expert1k_serial_begin()
 {
   SerialLock lock;
-  amp_serial_usb = app_config_amp_serial_usb();
+  amp_serial_port_selection = app_config_amp_serial_port();
   amp_baud = app_config_amp_baud();
   usb_escape_count = 0;
   usb_console_active = false;
-  if (!amp_serial_usb) {
-    Serial1.begin(amp_baud);
+  if (!amp_serial_is_usb()) {
+    begin_uart_port(amp_baud);
   }
 }
 
 int spe_expert1k_serial_available()
 {
   SerialLock lock;
-  if (amp_serial_usb && usb_console_active) {
+  if (amp_serial_is_usb() && usb_console_active) {
     return 0;
   }
   Stream &port = amp_serial_port();
@@ -142,7 +172,7 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   int value = -1;
   {
     SerialLock lock;
-    if (amp_serial_usb && usb_console_active) {
+    if (amp_serial_is_usb() && usb_console_active) {
       return false;
     }
     Stream &port = amp_serial_port();
@@ -155,7 +185,7 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
     value = port.read();
   }
 
-  if (amp_serial_usb) {
+  if (amp_serial_is_usb()) {
     if (value == 0x1b) {
       if (++usb_escape_count >= 3) {
         usb_console_active = true;
@@ -179,19 +209,24 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   return true;
 }
 
+AppAmpSerialPort spe_expert1k_amp_serial_port()
+{
+  return amp_serial_port_selection;
+}
+
 bool spe_expert1k_amp_uses_usb_serial()
 {
-  return amp_serial_usb;
+  return amp_serial_is_usb();
 }
 
 bool spe_expert1k_usb_console_active()
 {
-  return amp_serial_usb && usb_console_active;
+  return amp_serial_is_usb() && usb_console_active;
 }
 
 void spe_expert1k_usb_console_release()
 {
-  if (!amp_serial_usb) {
+  if (!amp_serial_is_usb()) {
     return;
   }
   usb_escape_count = 0;

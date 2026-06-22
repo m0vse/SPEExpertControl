@@ -277,7 +277,7 @@ static void print_serial_status()
   DebugSerialLock debug_lock;
   Serial.println(F("Amplifier serial stats:"));
   Serial.print(F("  transport="));
-  Serial.println(spe_expert1k_amp_uses_usb_serial() ? F("USB Serial") : F("Serial1 UART"));
+  Serial.println(app_config_amp_serial_port_name(spe_expert1k_amp_serial_port()));
   Serial.print(F("  baud="));
   Serial.println(app_config_amp_baud());
   Serial.print(F("  usb_console_active="));
@@ -514,26 +514,26 @@ static void print_amp_serial_config()
 {
   DebugSerialLock debug_lock;
   Serial.print(F("Active amplifier serial transport: "));
-  Serial.println(spe_expert1k_amp_uses_usb_serial() ? F("USB Serial") : F("Serial1 UART"));
+  Serial.println(app_config_amp_serial_port_name(spe_expert1k_amp_serial_port()));
   Serial.print(F("Saved amplifier serial transport: "));
-  Serial.println(app_config_amp_serial_usb() ? F("USB Serial") : F("Serial1 UART"));
+  Serial.println(app_config_amp_serial_port_name(app_config_amp_serial_port()));
   Serial.print(F("Saved amplifier baud rate: "));
   Serial.println(app_config_amp_baud());
-  Serial.println(F("Use 'amp-serial uart' or 'amp-serial usb' to change it."));
+  Serial.println(F("Use 'amp-serial uart1', 'uart2', 'uart3', 'uart4', or 'usb' to change it."));
   Serial.println(F("Use 'amp-baud 9600' through 'amp-baud 115200' to change baud."));
 }
 
-static void set_amp_serial_config(bool usb)
+static void set_amp_serial_config(AppAmpSerialPort port)
 {
-  const bool saved = app_config_amp_serial_usb();
-  if (saved == usb) {
+  const AppAmpSerialPort saved = app_config_amp_serial_port();
+  if (saved == port) {
     DebugSerialLock debug_lock;
     Serial.print(F("Amplifier serial transport already saved as "));
-    Serial.println(usb ? F("USB Serial") : F("Serial1 UART"));
+    Serial.println(app_config_amp_serial_port_name(port));
     return;
   }
 
-  if (!app_config_set_amp_serial_usb(usb)) {
+  if (!app_config_set_amp_serial_port(port)) {
     DebugSerialLock debug_lock;
     Serial.println(F("Failed to save amplifier serial transport setting"));
     return;
@@ -542,7 +542,7 @@ static void set_amp_serial_config(bool usb)
   {
     DebugSerialLock debug_lock;
     Serial.print(F("Saved amplifier serial transport as "));
-    Serial.print(usb ? F("USB Serial") : F("Serial1 UART"));
+    Serial.print(app_config_amp_serial_port_name(port));
     Serial.println(F("; rebooting to apply"));
     Serial.flush();
   }
@@ -637,10 +637,22 @@ static void handle_console_command(char *line)
     Serial.println(amp_dtr_gpio_level() == HIGH ? F("HIGH") : F("LOW"));
   } else if (strcmp(line, "amp-serial") == 0 || strcmp(line, "ampserial") == 0) {
     print_amp_serial_config();
-  } else if (strcmp(line, "amp-serial usb") == 0 || strcmp(line, "ampserial usb") == 0) {
-    set_amp_serial_config(true);
-  } else if (strcmp(line, "amp-serial uart") == 0 || strcmp(line, "ampserial uart") == 0) {
-    set_amp_serial_config(false);
+  } else if (strncmp(line, "amp-serial ", 11) == 0) {
+    AppAmpSerialPort port = AppAmpSerialPort::Uart1;
+    if (app_config_parse_amp_serial_port(line + 11, port)) {
+      set_amp_serial_config(port);
+    } else {
+      DebugSerialLock debug_lock;
+      Serial.println(F("Unsupported amplifier serial transport. Use uart1, uart2, uart3, uart4, or usb."));
+    }
+  } else if (strncmp(line, "ampserial ", 10) == 0) {
+    AppAmpSerialPort port = AppAmpSerialPort::Uart1;
+    if (app_config_parse_amp_serial_port(line + 10, port)) {
+      set_amp_serial_config(port);
+    } else {
+      DebugSerialLock debug_lock;
+      Serial.println(F("Unsupported amplifier serial transport. Use uart1, uart2, uart3, uart4, or usb."));
+    }
   } else if (strcmp(line, "amp-baud") == 0 || strcmp(line, "ampbaud") == 0) {
     print_amp_baud_config();
   } else if (strncmp(line, "amp-baud ", 9) == 0) {
@@ -655,7 +667,7 @@ static void handle_console_command(char *line)
       spe_expert1k_usb_console_release();
     } else {
       DebugSerialLock debug_lock;
-      Serial.println(F("Amplifier comms are using Serial1 UART; console remains active"));
+      Serial.println(F("Amplifier comms are not using USB Serial; console remains active"));
     }
   } else if (strcmp(line, "setup") == 0 || strcmp(line, "wifi-popup") == 0) {
 #if SPE_ENABLE_WIFI_SETUP

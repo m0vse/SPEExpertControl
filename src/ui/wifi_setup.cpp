@@ -83,6 +83,8 @@ static void wifi_set_status_text(const char *status_text, const char *startup_te
 static void wifi_apply_ui_updates(void);
 static void wifi_apply_scan_results(void);
 static void reboot_after_config_change(const char *message);
+static AppAmpSerialPort amp_serial_port_from_index(uint16_t index);
+static uint16_t amp_serial_port_to_index(AppAmpSerialPort port);
 static uint32_t amp_baud_from_index(uint16_t index);
 static uint16_t amp_baud_to_index(uint32_t baud);
 
@@ -135,8 +137,8 @@ void wifi_setup_create(void) {
     amp_serial_dropdown = lv_dropdown_create(wifi_panel);
     lv_obj_set_size(amp_serial_dropdown, 220, 42);
     lv_obj_set_pos(amp_serial_dropdown, 200, 30);
-    lv_dropdown_set_options(amp_serial_dropdown, "Amp serial: UART\nAmp serial: USB");
-    lv_dropdown_set_selected(amp_serial_dropdown, app_config_amp_serial_usb() ? 1 : 0);
+    lv_dropdown_set_options(amp_serial_dropdown, "Amp serial: UART1\nAmp serial: UART2\nAmp serial: UART3\nAmp serial: UART4\nAmp serial: USB");
+    lv_dropdown_set_selected(amp_serial_dropdown, amp_serial_port_to_index(app_config_amp_serial_port()));
     lv_obj_add_event_cb(amp_serial_dropdown, amp_serial_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     amp_baud_dropdown = lv_dropdown_create(wifi_panel);
@@ -624,20 +626,22 @@ static void display_flip_event_cb(lv_event_t *e) {
 
 static void amp_serial_event_cb(lv_event_t *e) {
     lv_obj_t *dropdown = static_cast<lv_obj_t *>(lv_event_get_target(e));
-    const bool enabled = lv_dropdown_get_selected(dropdown) == 1;
-    const bool current = app_config_amp_serial_usb();
+    const AppAmpSerialPort port = amp_serial_port_from_index(lv_dropdown_get_selected(dropdown));
+    const AppAmpSerialPort current = app_config_amp_serial_port();
 
-    if (enabled == current) {
+    if (port == current) {
         return;
     }
 
-    if (!app_config_set_amp_serial_usb(enabled)) {
-        lv_dropdown_set_selected(dropdown, current ? 1 : 0);
+    if (!app_config_set_amp_serial_port(port)) {
+        lv_dropdown_set_selected(dropdown, amp_serial_port_to_index(current));
         lv_label_set_text(wifi_status_label, "Amp serial setting changed, but saving failed.");
         return;
     }
 
-    reboot_after_config_change(enabled ? "USB amp serial saved. Rebooting..." : "UART amp serial saved. Rebooting...");
+    char message[64];
+    snprintf(message, sizeof(message), "Amp serial %s saved. Rebooting...", app_config_amp_serial_port_name(port));
+    reboot_after_config_change(message);
 }
 
 static void amp_baud_event_cb(lv_event_t *e) {
@@ -918,6 +922,36 @@ static uint32_t amp_baud_from_index(uint16_t index) {
         return APP_CONFIG_DEFAULT_AMP_BAUD;
     }
     return baud_options[index];
+}
+
+static AppAmpSerialPort amp_serial_port_from_index(uint16_t index) {
+    static const AppAmpSerialPort port_options[] = {
+        AppAmpSerialPort::Uart1,
+        AppAmpSerialPort::Uart2,
+        AppAmpSerialPort::Uart3,
+        AppAmpSerialPort::Uart4,
+        AppAmpSerialPort::Usb,
+    };
+    if (index >= sizeof(port_options) / sizeof(port_options[0])) {
+        return AppAmpSerialPort::Uart1;
+    }
+    return port_options[index];
+}
+
+static uint16_t amp_serial_port_to_index(AppAmpSerialPort port) {
+    static const AppAmpSerialPort port_options[] = {
+        AppAmpSerialPort::Uart1,
+        AppAmpSerialPort::Uart2,
+        AppAmpSerialPort::Uart3,
+        AppAmpSerialPort::Uart4,
+        AppAmpSerialPort::Usb,
+    };
+    for (uint16_t i = 0; i < sizeof(port_options) / sizeof(port_options[0]); ++i) {
+        if (port_options[i] == port) {
+            return i;
+        }
+    }
+    return 0;
 }
 
 static uint16_t amp_baud_to_index(uint32_t baud) {

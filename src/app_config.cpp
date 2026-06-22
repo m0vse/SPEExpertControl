@@ -18,6 +18,11 @@
 static const char *APP_CONFIG_PATH = "/fs/spe_wifi.cfg";
 static const uint32_t AMP_BAUD_OPTIONS[] = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200};
 
+static bool is_truthy_config_value(const char *value)
+{
+    return strcmp(value, "1") == 0 || strcmp(value, "true") == 0 || strcmp(value, "yes") == 0 || strcmp(value, "usb") == 0;
+}
+
 static AppConfig config;
 static bool config_loaded = false;
 static rtos::Mutex config_mutex;
@@ -104,9 +109,12 @@ bool app_config_load(void)
                 strncpy(loaded.wifi_password, line + 9, sizeof(loaded.wifi_password) - 1);
                 loaded.wifi_password[sizeof(loaded.wifi_password) - 1] = '\0';
             } else if (strncmp(line, "display_flipped=", 16) == 0) {
-                loaded.display_flipped = strcmp(line + 16, "1") == 0 || strcmp(line + 16, "true") == 0;
-            } else if (strncmp(line, "amp_serial_usb=", 15) == 0) {
-                loaded.amp_serial_usb = strcmp(line + 15, "1") == 0 || strcmp(line + 15, "true") == 0;
+                loaded.display_flipped = is_truthy_config_value(line + 16);
+            } else if (strncmp(line, "amp_serial_port=", 16) == 0) {
+                AppAmpSerialPort port = AppAmpSerialPort::Uart1;
+                if (app_config_parse_amp_serial_port(line + 16, port)) {
+                    loaded.amp_serial_port = port;
+                }
             } else if (strncmp(line, "amp_baud=", 9) == 0) {
                 const uint32_t baud = strtoul(line + 9, nullptr, 10);
                 if (app_config_is_valid_amp_baud(baud)) {
@@ -149,7 +157,7 @@ bool app_config_save(void)
         fprintf(fp, "ssid=%s\n", snapshot.wifi_ssid);
         fprintf(fp, "password=%s\n", snapshot.wifi_password);
         fprintf(fp, "display_flipped=%d\n", snapshot.display_flipped ? 1 : 0);
-        fprintf(fp, "amp_serial_usb=%d\n", snapshot.amp_serial_usb ? 1 : 0);
+        fprintf(fp, "amp_serial_port=%s\n", app_config_amp_serial_port_name(snapshot.amp_serial_port));
         fprintf(fp, "amp_baud=%lu\n", static_cast<unsigned long>(snapshot.amp_baud));
         fclose(fp);
         saved = true;
@@ -183,17 +191,61 @@ bool app_config_set_display_flipped(bool flipped)
     return app_config_save();
 }
 
-bool app_config_amp_serial_usb(void)
+AppAmpSerialPort app_config_amp_serial_port(void)
 {
     ConfigLock lock;
-    return config.amp_serial_usb;
+    return config.amp_serial_port;
 }
 
-bool app_config_set_amp_serial_usb(bool enabled)
+const char *app_config_amp_serial_port_name(AppAmpSerialPort port)
 {
+    switch (port) {
+        case AppAmpSerialPort::Uart1: return "uart1";
+        case AppAmpSerialPort::Uart2: return "uart2";
+        case AppAmpSerialPort::Uart3: return "uart3";
+        case AppAmpSerialPort::Uart4: return "uart4";
+        case AppAmpSerialPort::Usb: return "usb";
+        default: return "uart1";
+    }
+}
+
+bool app_config_parse_amp_serial_port(const char *value, AppAmpSerialPort &port)
+{
+    if (!value) {
+        return false;
+    }
+    if (strcmp(value, "uart1") == 0 || strcmp(value, "serial1") == 0 || strcmp(value, "uart") == 0) {
+        port = AppAmpSerialPort::Uart1;
+        return true;
+    }
+    if (strcmp(value, "uart2") == 0 || strcmp(value, "serial2") == 0) {
+        port = AppAmpSerialPort::Uart2;
+        return true;
+    }
+    if (strcmp(value, "uart3") == 0 || strcmp(value, "serial3") == 0) {
+        port = AppAmpSerialPort::Uart3;
+        return true;
+    }
+    if (strcmp(value, "uart4") == 0 || strcmp(value, "serial4") == 0) {
+        port = AppAmpSerialPort::Uart4;
+        return true;
+    }
+    if (strcmp(value, "usb") == 0 || strcmp(value, "serial") == 0) {
+        port = AppAmpSerialPort::Usb;
+        return true;
+    }
+    return false;
+}
+
+bool app_config_set_amp_serial_port(AppAmpSerialPort port)
+{
+    if (port < AppAmpSerialPort::Uart1 || port > AppAmpSerialPort::Usb) {
+        return false;
+    }
+
     {
         ConfigLock lock;
-        config.amp_serial_usb = enabled;
+        config.amp_serial_port = port;
         config_loaded = true;
     }
     return app_config_save();

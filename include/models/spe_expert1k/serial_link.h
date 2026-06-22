@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 
+#include "app_config.h"
 #include "models/spe_expert1k/expertpackets.h"
 #include "models/spe_expert1k/packet_parser.h"
 #include <Arduino.h>
@@ -32,6 +33,7 @@ struct SpeExpert1kReadResult {
 void spe_expert1k_serial_begin();
 int spe_expert1k_serial_available();
 bool spe_expert1k_serial_read(SpeExpert1kReadResult &result);
+AppAmpSerialPort spe_expert1k_amp_serial_port();
 bool spe_expert1k_amp_uses_usb_serial();
 bool spe_expert1k_usb_console_active();
 void spe_expert1k_usb_console_release();

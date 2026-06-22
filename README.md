@@ -98,7 +98,7 @@ The environment uses DFU upload. If the board is already in DFU mode, PlatformIO
 
 The normal amplifier link uses `Serial1` through the MAX3232 RS-232 interface. This is the default and is the recommended configuration for the SPE Expert 1K-FA hardware.
 
-For model-protocol development or bench testing, the amplifier protocol can instead use the USB CDC `Serial` port. Open the controller setup popup and select `Amp serial: USB` from the transport dropdown, or use the serial console command `amp-serial usb`. Changing this setting saves it to QSPI storage and immediately reboots so the serial tasks restart on the selected transport. Use `Amp serial: UART` or `amp-serial uart` to return to the default.
+For model-protocol development or bench testing, the amplifier protocol can instead use `Serial2`, `Serial3`, `Serial4`, or the USB CDC `Serial` port. Open the controller setup popup and select the port from the `Amp serial` dropdown, or use the serial console command `amp-serial uart1`, `uart2`, `uart3`, `uart4`, or `usb`. Changing this setting saves it to QSPI storage and immediately reboots so the serial tasks restart on the selected transport.
 
 The amplifier serial baud rate is also configurable. The default is `9600`, matching the current 1K-FA setup. Supported rates are `1200`, `2400`, `4800`, `9600`, `19200`, `38400`, `57600`, and `115200`. Change this from the setup popup baud dropdown or with `amp-baud <rate>`; changing it also saves and reboots.
 
@@ -131,7 +131,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | `reboot` | `reset` | Reboot the controller with `NVIC_SystemReset()`. |
 | `rcu` | - | Queue an `RCU_ON` command to the amplifier. |
 | `dtr` | - | Print the configured DTR pin, logical asserted state, and actual GPIO level. With the current MAX3232 wiring, asserted DTR is `D7 LOW`. |
-| `amp-serial` | `ampserial` | Print the active and saved amplifier serial transport. Use `amp-serial uart` or `amp-serial usb` to save a new transport and reboot. |
+| `amp-serial` | `ampserial` | Print the active and saved amplifier serial transport. Use `amp-serial uart1`, `uart2`, `uart3`, `uart4`, or `usb` to save a new transport and reboot. |
 | `amp-baud` | `ampbaud` | Print the saved amplifier baud rate. Use `amp-baud 1200`, `2400`, `4800`, `9600`, `19200`, `38400`, `57600`, or `115200` to save a new baud rate and reboot. |
 | `exit` | `passthrough` | In USB amplifier mode, close the debug console and return USB `Serial` to amplifier communications. In normal UART mode, this reports that the console remains active. |
 | `setup` | `wifi-popup` | Open the hidden controller setup popup on the LCD. This is the same panel opened by tapping the top-left of the display. |
