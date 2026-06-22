@@ -21,4 +21,8 @@ public:
   virtual const char *screen_name() const = 0;
   virtual unsigned long last_activity_ms() const = 0;
   virtual void publish_status() const = 0;
+  virtual bool press_key(const char *name) = 0;
+  virtual bool power_on() = 0;
+  virtual bool remote_updates_enabled() const = 0;
+  virtual void process_next_queued_command() = 0;
 };

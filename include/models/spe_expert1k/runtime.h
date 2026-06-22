@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <initializer_list>
 #include <stddef.h>
 #include <lvgl.h>
 
@@ -35,6 +36,10 @@ public:
   const char *screen_name() const override;
   unsigned long last_activity_ms() const override;
   void publish_status() const override;
+  bool press_key(const char *name) override;
+  bool power_on() override;
+  bool remote_updates_enabled() const override;
+  void process_next_queued_command() override;
 
   ExpertScreen screen() const;
   const Expert_Packet &last_status() const;
@@ -46,7 +51,10 @@ public:
                              unsigned long now);
 
 private:
+  bool send_command(std::initializer_list<uint8_t> cmd);
+
   bool status_valid_ = false;
+  bool remote_update_enabled_ = true;
   ExpertScreen screen_ = BootMessage;
   Expert_Packet last_status_{};
   Expert_Packet web_cat_snapshot_{};

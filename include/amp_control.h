@@ -7,6 +7,13 @@
 
 #pragma once
 
+class AmplifierRuntime;
+
+/**
+ * Bind the active amplifier model runtime used by the public control facade.
+ */
+void amp_control_bind_runtime(AmplifierRuntime *runtime);
+
 /**
  * Send one named front-panel key command to the amplifier.
  *
@@ -26,3 +33,8 @@ bool amp_control_power_on();
  * @return true while automatic RCU_ON keepalive polling should continue.
  */
 bool amp_control_remote_updates_enabled();
+
+/**
+ * Send one queued model-specific command frame, if one is pending.
+ */
+void amp_control_process_next_queued_command();

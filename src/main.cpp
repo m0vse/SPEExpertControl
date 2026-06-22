@@ -621,6 +621,7 @@ void setup() {
   boot_led_set(LEDG, false);
   boot_led_set(LEDB, false);
   amp_dtr_begin();
+  amp_control_bind_runtime(&amp_runtime);
 
   while(!Serial && millis()<4000) {
     delay(10);
@@ -879,7 +880,7 @@ void serial_task()
   }
 
     if (completed_packet) {
-      spe_expert1k_process_next_queued_command();
+      amp_control_process_next_queued_command();
     }
     rtos::ThisThread::sleep_for(1ms);
   }
