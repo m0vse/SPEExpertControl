@@ -104,6 +104,7 @@ static lv_obj_t *setup_baudrate_items[4];
 // Amplifier settings
 static constexpr unsigned long SPE_EXPERT1K_RCU_REFRESH_MS = 1000;
 static constexpr unsigned long SPE_MODERN_RCU_REFRESH_MS = 500;
+static constexpr unsigned long SPE_DTR_STARTUP_ASSERT_DELAY_MS = 3000;
 bool touch_ready = false;
 int transformed_touch_devices = 0;
 static rtos::Mutex lvgl_mutex;
@@ -119,6 +120,7 @@ static int generic_amp_lcd_wifi_status = -999;
 static uint32_t generic_amp_lcd_sequence = 0;
 static bool no_amp_lcd_ready = false;
 static int no_amp_lcd_wifi_status = -999;
+static unsigned long dtr_auto_assert_after_ms = 0;
 
 static void configure_front_panel_button_styles()
 {
@@ -188,6 +190,11 @@ static void update_generic_amp_lcd_state()
     wifi_status = WiFi.status();
     if (wifi_status == WL_CONNECTED) {
       wifi_ip = WiFi.localIP().toString();
+      const uint16_t web_port = app_config_web_port();
+      if (web_port != 80) {
+        wifi_ip += ":";
+        wifi_ip += web_port;
+      }
     }
   }
 #endif
@@ -362,6 +369,7 @@ static void print_console_help()
   Serial.println(F("  status      Controller summary"));
   Serial.println(F("  wifi        WiFi status, IP and firmware"));
   Serial.println(F("  web         HTTP server counters"));
+  Serial.println(F("  web-port    Show or set HTTP server port"));
   Serial.println(F("  serial      Amplifier serial health counters"));
   Serial.println(F("  amp         Last amplifier status packet"));
   Serial.println(F("  model       Show or set amplifier model"));
@@ -443,11 +451,54 @@ static void print_web_status()
 {
 #if SPE_ENABLE_WEB_SERVER
   DebugSerialLock debug_lock;
+  Serial.print(F("Saved HTTP server port: "));
+  Serial.println(app_config_web_port());
   control_server_print_stats(Serial);
 #else
   DebugSerialLock debug_lock;
   Serial.println(F("Web server disabled at build time"));
 #endif
+}
+
+static void print_web_port_config()
+{
+  DebugSerialLock debug_lock;
+  Serial.print(F("Saved HTTP server port: "));
+  Serial.println(app_config_web_port());
+  Serial.println(F("Use 'web-port <1-65535>' to change it; reboot required."));
+}
+
+static void set_web_port_config(uint32_t port)
+{
+  if (!app_config_is_valid_web_port(port)) {
+    DebugSerialLock debug_lock;
+    Serial.println(F("Unsupported HTTP server port. Use 1-65535."));
+    return;
+  }
+
+  const uint16_t saved = app_config_web_port();
+  if (port == saved) {
+    DebugSerialLock debug_lock;
+    Serial.print(F("HTTP server port already saved as "));
+    Serial.println(saved);
+    return;
+  }
+
+  if (!app_config_set_web_port(static_cast<uint16_t>(port))) {
+    DebugSerialLock debug_lock;
+    Serial.println(F("Failed to save HTTP server port"));
+    return;
+  }
+
+  {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Saved HTTP server port as "));
+    Serial.print(port);
+    Serial.println(F("; rebooting to apply"));
+    Serial.flush();
+  }
+  delay(100);
+  NVIC_SystemReset();
 }
 
 static void print_serial_status()
@@ -902,6 +953,12 @@ static void handle_console_command(char *line)
     print_wifi_status();
   } else if (strcmp(line, "web") == 0) {
     print_web_status();
+  } else if (strcmp(line, "web-port") == 0 || strcmp(line, "webport") == 0) {
+    print_web_port_config();
+  } else if (strncmp(line, "web-port ", 9) == 0) {
+    set_web_port_config(strtoul(line + 9, nullptr, 10));
+  } else if (strncmp(line, "webport ", 8) == 0) {
+    set_web_port_config(strtoul(line + 8, nullptr, 10));
   } else if (strcmp(line, "serial") == 0 || strcmp(line, "ser") == 0) {
     print_serial_status();
   } else if (strcmp(line, "amp") == 0) {
@@ -1060,6 +1117,7 @@ void setup() {
   boot_led_set(LEDG, false);
   boot_led_set(LEDB, false);
   amp_dtr_begin();
+  dtr_auto_assert_after_ms = millis() + SPE_DTR_STARTUP_ASSERT_DELAY_MS;
 
   while(!Serial && millis()<4000) {
     delay(10);
@@ -1299,7 +1357,8 @@ void serial_task()
     // Keep the amplifier remote-control stream alive if no status packets arrive.
     unsigned long now = millis();
     AmplifierRuntime *runtime = amplifier_runtime_active();
-    if (!startup_probe_sent && runtime && amp_control_remote_updates_enabled()) {
+    if (!startup_probe_sent && runtime && amp_control_remote_updates_enabled() &&
+        now >= dtr_auto_assert_after_ms) {
       amp_control_power_on();
       runtime->note_keepalive(now);
       startup_probe_sent = true;

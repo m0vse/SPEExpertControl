@@ -119,6 +119,11 @@ bool app_config_load(void)
                 if (app_config_is_valid_amp_baud(baud)) {
                     loaded.amp_baud = baud;
                 }
+            } else if (strncmp(line, "web_port=", 9) == 0) {
+                const uint32_t port = strtoul(line + 9, nullptr, 10);
+                if (app_config_is_valid_web_port(port)) {
+                    loaded.web_port = static_cast<uint16_t>(port);
+                }
             }
         }
         fclose(fp);
@@ -158,6 +163,7 @@ bool app_config_save(void)
         fprintf(fp, "amp_model=%s\n", amp_model_key(snapshot.amp_model));
         fprintf(fp, "amp_serial_port=%s\n", app_config_amp_serial_port_name(snapshot.amp_serial_port));
         fprintf(fp, "amp_baud=%lu\n", static_cast<unsigned long>(snapshot.amp_baud));
+        fprintf(fp, "web_port=%u\n", snapshot.web_port);
         fclose(fp);
         saved = true;
     }
@@ -295,6 +301,31 @@ bool app_config_set_amp_baud(uint32_t baud)
     {
         ConfigLock lock;
         config.amp_baud = baud;
+        config_loaded = true;
+    }
+    return app_config_save();
+}
+
+uint16_t app_config_web_port(void)
+{
+    ConfigLock lock;
+    return config.web_port;
+}
+
+bool app_config_is_valid_web_port(uint32_t port)
+{
+    return port >= 1 && port <= 65535;
+}
+
+bool app_config_set_web_port(uint16_t port)
+{
+    if (!app_config_is_valid_web_port(port)) {
+        return false;
+    }
+
+    {
+        ConfigLock lock;
+        config.web_port = port;
         config_loaded = true;
     }
     return app_config_save();

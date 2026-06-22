@@ -28,6 +28,7 @@ struct ControlServerStats {
     uint32_t logo_requests = 0;
     uint32_t bad_key_requests = 0;
     uint32_t last_request_ms = 0;
+    uint16_t active_port = APP_CONFIG_DEFAULT_WEB_PORT;
     char last_request[32] = "";
 };
 
@@ -112,7 +113,11 @@ public:
             begin();
         }
 
-        WiFiClient client = server_.accept();
+        if (!server_) {
+            return;
+        }
+
+        WiFiClient client = server_->accept();
         if (!client) {
             return;
         }
@@ -127,9 +132,17 @@ private:
             return;
         }
 
-        server_.begin();
+        active_port_ = app_config_web_port();
+        if (server_) {
+            delete server_;
+        }
+        server_ = new WiFiServer(active_port_);
+        server_->begin();
         started_ = true;
-        updateStats([](ControlServerStats &s) { ++s.server_starts; });
+        updateStats([](ControlServerStats &s) {
+            ++s.server_starts;
+            s.active_port = app_config_web_port();
+        });
         if (debug_background_logs_enabled()) {
             Serial.println(F("HTTP control server started"));
         }
@@ -149,7 +162,12 @@ private:
         Serial.print(WiFi.RSSI());
         Serial.println(F(" dBm"));
         Serial.print(F("Web UI: http://"));
-        Serial.println(ip);
+        Serial.print(ip);
+        if (active_port_ != 80) {
+            Serial.print(':');
+            Serial.print(active_port_);
+        }
+        Serial.println();
     }
 
     void handleClient(WiFiClient &client)
@@ -293,7 +311,8 @@ private:
         body += '}';
     }
 
-    WiFiServer server_{80};
+    WiFiServer *server_ = nullptr;
+    uint16_t active_port_ = APP_CONFIG_DEFAULT_WEB_PORT;
     int last_wifi_status_ = WL_IDLE_STATUS;
     bool started_ = false;
 };
@@ -316,6 +335,8 @@ void control_server_print_stats(Print &out)
     out.println(F("HTTP server stats:"));
     out.print(F("  server_starts="));
     out.println(snapshot.server_starts);
+    out.print(F("  active_port="));
+    out.println(snapshot.active_port);
     out.print(F("  wifi_disconnects="));
     out.println(snapshot.wifi_disconnects);
     out.print(F("  clients="));

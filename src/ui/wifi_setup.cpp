@@ -14,6 +14,7 @@
 #include <WiFi.h>
 #include <rtos.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ui.h>
 
@@ -64,6 +65,7 @@ static lv_obj_t *display_flip_button = NULL;
 static lv_obj_t *display_flip_label = NULL;
 static lv_obj_t *amp_serial_dropdown = NULL;
 static lv_obj_t *amp_baud_dropdown = NULL;
+static lv_obj_t *web_port_textarea = NULL;
 static lv_obj_t *wifi_keyboard = NULL;
 static lv_obj_t *wifi_status_label = NULL;
 static lv_obj_t *wifi_hotspot = NULL;
@@ -75,6 +77,7 @@ static void wifi_password_event_cb(lv_event_t *e);
 static void display_flip_event_cb(lv_event_t *e);
 static void amp_serial_event_cb(lv_event_t *e);
 static void amp_baud_event_cb(lv_event_t *e);
+static void web_port_textarea_event_cb(lv_event_t *e);
 static void wifi_hotspot_event_cb(lv_event_t *e);
 static void connect_selected_wifi(void);
 static void wifi_keyboard_set_visible(bool visible);
@@ -106,6 +109,21 @@ static bool debug_background_logs_enabled()
     return app_config_amp_serial_port() != AppAmpSerialPort::Usb;
 }
 
+static void web_port_textarea_set_port(uint16_t port) {
+    char text[6];
+    snprintf(text, sizeof(text), "%u", port);
+    lv_textarea_set_text(web_port_textarea, text);
+}
+
+static lv_obj_t *create_setup_label(lv_obj_t *parent, const char *text, int x, int y, int width) {
+    lv_obj_t *label = lv_label_create(parent);
+    lv_label_set_text(label, text);
+    lv_obj_set_width(label, width);
+    lv_obj_set_pos(label, x, y);
+    lv_obj_set_style_text_color(label, lv_color_hex(0x303030), LV_PART_MAIN | LV_STATE_DEFAULT);
+    return label;
+}
+
 static lv_obj_t *create_wifi_button(lv_obj_t *parent, const char *text, int x, int y, lv_event_cb_t cb) {
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_size(button, 150, 44);
@@ -135,36 +153,54 @@ void wifi_setup_create(void) {
     lv_label_set_text(title, "Controller setup");
     lv_obj_set_pos(title, 0, 0);
 
+    create_setup_label(wifi_panel, "Display", 0, 26, 160);
     display_flip_button = lv_button_create(wifi_panel);
-    lv_obj_set_size(display_flip_button, 180, 42);
-    lv_obj_set_pos(display_flip_button, 0, 30);
+    lv_obj_set_size(display_flip_button, 160, 42);
+    lv_obj_set_pos(display_flip_button, 0, 46);
     lv_obj_add_event_cb(display_flip_button, display_flip_event_cb, LV_EVENT_CLICKED, NULL);
     display_flip_label = lv_label_create(display_flip_button);
-    lv_label_set_text_fmt(display_flip_label, "Flip display: %s", app_config_display_flipped() ? "On" : "Off");
+    lv_label_set_text_fmt(display_flip_label, "Flip: %s", app_config_display_flipped() ? "On" : "Off");
     lv_obj_center(display_flip_label);
 
+    create_setup_label(wifi_panel, "Amp port", 180, 26, 105);
     amp_serial_dropdown = lv_dropdown_create(wifi_panel);
-    lv_obj_set_size(amp_serial_dropdown, 220, 42);
-    lv_obj_set_pos(amp_serial_dropdown, 200, 30);
-    lv_dropdown_set_options(amp_serial_dropdown, "Amp serial: UART1\nAmp serial: UART2\nAmp serial: UART3\nAmp serial: UART4\nAmp serial: USB");
+    lv_obj_set_size(amp_serial_dropdown, 105, 42);
+    lv_obj_set_pos(amp_serial_dropdown, 180, 46);
+    lv_dropdown_set_options(amp_serial_dropdown, "UART1\nUART2\nUART3\nUART4\nUSB");
     lv_dropdown_set_selected(amp_serial_dropdown, amp_serial_port_to_index(app_config_amp_serial_port()));
     lv_obj_add_event_cb(amp_serial_dropdown, amp_serial_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
+    create_setup_label(wifi_panel, "Amp baud", 305, 26, 150);
     amp_baud_dropdown = lv_dropdown_create(wifi_panel);
-    lv_obj_set_size(amp_baud_dropdown, 170, 42);
-    lv_obj_set_pos(amp_baud_dropdown, 445, 30);
+    lv_obj_set_size(amp_baud_dropdown, 150, 42);
+    lv_obj_set_pos(amp_baud_dropdown, 305, 46);
     lv_dropdown_set_options(amp_baud_dropdown, "1200 baud\n2400 baud\n4800 baud\n9600 baud\n19200 baud\n38400 baud\n57600 baud\n115200 baud");
     lv_dropdown_set_selected(amp_baud_dropdown, amp_baud_to_index(app_config_amp_baud()));
     lv_obj_add_event_cb(amp_baud_dropdown, amp_baud_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
+    create_setup_label(wifi_panel, "Web port", 475, 26, 105);
+    web_port_textarea = lv_textarea_create(wifi_panel);
+    lv_obj_set_size(web_port_textarea, 105, 42);
+    lv_obj_set_pos(web_port_textarea, 475, 46);
+    lv_textarea_set_one_line(web_port_textarea, true);
+    lv_textarea_set_max_length(web_port_textarea, 5);
+    lv_textarea_set_accepted_chars(web_port_textarea, "0123456789");
+    lv_textarea_set_placeholder_text(web_port_textarea, "80");
+    web_port_textarea_set_port(app_config_web_port());
+    lv_obj_add_event_cb(web_port_textarea, web_port_textarea_event_cb, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(web_port_textarea, web_port_textarea_event_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(web_port_textarea, web_port_textarea_event_cb, LV_EVENT_CANCEL, NULL);
+
+    create_setup_label(wifi_panel, "WiFi network", 0, 90, 430);
     wifi_dropdown = lv_dropdown_create(wifi_panel);
     lv_obj_set_size(wifi_dropdown, 430, 42);
-    lv_obj_set_pos(wifi_dropdown, 0, 78);
+    lv_obj_set_pos(wifi_dropdown, 0, 110);
     lv_dropdown_set_options(wifi_dropdown, "Not scanned");
 
+    create_setup_label(wifi_panel, "Password", 445, 90, 250);
     wifi_password = lv_textarea_create(wifi_panel);
     lv_obj_set_size(wifi_password, 250, 42);
-    lv_obj_set_pos(wifi_password, 445, 78);
+    lv_obj_set_pos(wifi_password, 445, 110);
     lv_textarea_set_one_line(wifi_password, true);
     lv_textarea_set_password_mode(wifi_password, true);
     lv_textarea_set_placeholder_text(wifi_password, "Password");
@@ -172,13 +208,13 @@ void wifi_setup_create(void) {
     lv_obj_add_event_cb(wifi_password, wifi_password_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(wifi_password, wifi_password_event_cb, LV_EVENT_CANCEL, NULL);
 
-    create_wifi_button(wifi_panel, "Connect", 0, 138, wifi_connect_event_cb);
-    create_wifi_button(wifi_panel, "Search", 170, 138, wifi_rescan_event_cb);
-    create_wifi_button(wifi_panel, "Close", 340, 138, wifi_skip_event_cb);
+    create_wifi_button(wifi_panel, "Connect", 0, 166, wifi_connect_event_cb);
+    create_wifi_button(wifi_panel, "Search", 170, 166, wifi_rescan_event_cb);
+    create_wifi_button(wifi_panel, "Close", 340, 166, wifi_skip_event_cb);
 
     wifi_status_label = lv_label_create(wifi_panel);
     lv_obj_set_width(wifi_status_label, 690);
-    lv_obj_set_pos(wifi_status_label, 0, 200);
+    lv_obj_set_pos(wifi_status_label, 0, 222);
     if (saved_credentials_valid) {
         lv_label_set_text_fmt(wifi_status_label, "Saved network: %s. Auto-connect will run shortly.", saved_ssid);
     } else {
@@ -634,10 +670,57 @@ static void wifi_password_event_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_FOCUSED) {
         lv_keyboard_set_textarea(wifi_keyboard, wifi_password);
+        lv_keyboard_set_mode(wifi_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
         wifi_keyboard_set_visible(true);
     } else if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
         wifi_keyboard_set_visible(false);
     }
+}
+
+static void web_port_textarea_event_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_FOCUSED) {
+        lv_keyboard_set_textarea(wifi_keyboard, web_port_textarea);
+        lv_keyboard_set_mode(wifi_keyboard, LV_KEYBOARD_MODE_NUMBER);
+        wifi_keyboard_set_visible(true);
+        return;
+    }
+
+    if (code == LV_EVENT_CANCEL) {
+        web_port_textarea_set_port(app_config_web_port());
+        wifi_keyboard_set_visible(false);
+        return;
+    }
+
+    if (code != LV_EVENT_READY) {
+        return;
+    }
+
+    wifi_keyboard_set_visible(false);
+    const char *text = lv_textarea_get_text(web_port_textarea);
+    const uint32_t port = strtoul(text ? text : "", nullptr, 10);
+    const uint16_t current = app_config_web_port();
+
+    if (!app_config_is_valid_web_port(port)) {
+        web_port_textarea_set_port(current);
+        lv_label_set_text(wifi_status_label, "Web port must be 1-65535.");
+        return;
+    }
+
+    if (port == current) {
+        lv_label_set_text(wifi_status_label, "Web port unchanged.");
+        return;
+    }
+
+    if (!app_config_set_web_port(static_cast<uint16_t>(port))) {
+        web_port_textarea_set_port(current);
+        lv_label_set_text(wifi_status_label, "Web port changed, but saving failed.");
+        return;
+    }
+
+    char message[64];
+    snprintf(message, sizeof(message), "Web port %lu saved. Rebooting...", static_cast<unsigned long>(port));
+    reboot_after_config_change(message);
 }
 
 static void display_flip_event_cb(lv_event_t *e) {

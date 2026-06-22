@@ -12,7 +12,7 @@ static bool dtr_asserted = false;
 void amp_dtr_begin()
 {
   pinMode(SPE_AMP_DTR_PIN, OUTPUT);
-  amp_dtr_set(true);
+  amp_dtr_set(false);
 }
 
 void amp_dtr_set(bool asserted)

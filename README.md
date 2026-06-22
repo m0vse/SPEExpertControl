@@ -19,7 +19,8 @@ The project provides a local LVGL touch interface, serial control of the amplifi
 
 The tested enclosure is the KKSB Cases KKSB Case with Adjustable Stand for Arduino GIGA WiFi and Arduino GIGA Display Shield, listed on Amazon UK as ASIN [`B0CTMX2Z46`](https://www.amazon.co.uk/dp/B0CTMX2Z46/). It fits the controller well; the only required mechanical change is a hole in the perspex back panel for the amplifier DB-9 connector.
 
-<img src="https://m.media-amazon.com/images/I/61t7FyWMJ3L._AC_SL1500_.jpg" alt="tested enclosure" width="360">
+<img src="images/standby.jpg" alt="SPEExpertControl mounted in the KKSB enclosure" width="280">
+<img src="images/rear-view.jpg" alt="Rear view showing the modified perspex back panel and amplifier wiring" width="280">
 
 ### Amplifier RS-232 Wiring
 
@@ -44,7 +45,7 @@ The MAX3232 outputs should connect to the amplifier side of the D-type socket:
 | `T2OUT` | Pin 4, DTR | DTR asserted by controller |
 | `GND` | Pin 5, GND | Common signal ground |
 
-`D7` is assigned as `SPE_AMP_DTR_PIN`. The firmware asserts DTR during controller startup to request remote power-on. When the OFF button command is sent, the firmware releases DTR immediately, sends the OFF key command and `RCU_OFF`, and stops the periodic `RCU_ON` polling so the amplifier can power down. Pressing ON asserts DTR again and restarts remote console updates. This behaviour is deliberately driven by the button commands rather than the last received amplifier state, so OFF can still release DTR if the amplifier is not currently responding.
+`D7` is assigned as `SPE_AMP_DTR_PIN`. The firmware drives DTR off as soon as setup starts, waits a short startup grace period, then asserts DTR when automatic remote polling begins to request remote power-on. When the OFF button command is sent, the firmware releases DTR immediately, sends the OFF key command and `RCU_OFF`, and stops the periodic `RCU_ON` polling so the amplifier can power down. Pressing ON asserts DTR again and restarts remote console updates. This behaviour is deliberately driven by the button commands rather than the last received amplifier state, so OFF can still release DTR if the amplifier is not currently responding.
 
 Because the MAX3232 transmitter inverts the logic level, the firmware drives `D7` low to assert RS-232 DTR. If the wiring is moved later, change `SPE_AMP_DTR_PIN` in [include/amp_dtr.h](include/amp_dtr.h).
 
@@ -137,7 +138,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | `help` | `?` | Show the firmware command list. |
 | `status` | - | Print controller uptime, boot progress, touch state, transformed input-device count, current screen, and `serial1_available` when high bring-up diagnostics are enabled. |
 | `wifi` | - | Print WiFi status code/name, WiFi firmware version, setup connection state, saved-credential state, and SSID/IP/RSSI when connected. |
-| `web` | - | Print HTTP server counters, including starts, disconnects, client count, request counts, bad key requests, and the last request path/time. |
+| `web` | - | Print HTTP server counters, including starts, disconnects, active port, client count, request counts, bad key requests, and the last request path/time. |
 | `serial` | `ser` | Print amplifier UART health counters. Use this when checking checksum errors, queue depth, missed packets, or whether the serial task is falling behind. |
 | `amp` | - | Print the last decoded 30-byte amplifier status packet, screen name, DTR state, band, input, antenna, CAT mode, output power setting, power, reflected power, SWR/gain, temperature, PA voltage, and PA current. |
 | `model` | `amp-model` | Print active/saved amplifier model and known model IDs. Normal operation uses automatic protocol detection; manual model selection is retained for diagnostics and development. |
@@ -149,6 +150,7 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | `dtr` | - | Print the configured DTR pin, logical asserted state, and actual GPIO level. With the current MAX3232 wiring, asserted DTR is `D7 LOW`. |
 | `amp-serial` | `ampserial` | Print the active and saved amplifier serial transport. Use `amp-serial uart1`, `uart2`, `uart3`, `uart4`, or `usb` to save a new transport and reboot. |
 | `amp-baud` | `ampbaud` | Print the saved amplifier baud rate. Use `amp-baud 1200`, `2400`, `4800`, `9600`, `19200`, `38400`, `57600`, or `115200` to save a new baud rate and reboot. |
+| `web-port` | `webport` | Print the saved HTTP server port. Use `web-port <1-65535>` to save a new port and reboot. |
 | `exit` | `passthrough` | In USB amplifier mode, close the debug console and return USB `Serial` to amplifier communications. In normal UART mode, this reports that the console remains active. |
 | `setup` | `wifi-popup` | Open the hidden controller setup popup on the LCD. This is the same panel opened by tapping the top-left of the display. |
 | `wifi-saved` | - | Print whether saved WiFi credentials exist, the saved SSID, and password length. The password itself is not printed. |
@@ -195,15 +197,15 @@ The `stats` command reports Mbed heap, stack, CPU, and RTOS thread data. Thread 
 
 ## Setup And WiFi
 
-WiFi, display orientation, and amplifier serial transport are configured from a hidden setup popup on the LCD. Tap the top-left of the display or run the serial console `setup` command to open it.
+WiFi, display orientation, amplifier serial transport, and the web server port are configured from a hidden setup popup on the LCD. Tap the top-left of the display or run the serial console `setup` command to open it.
 
-Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option plus amplifier serial transport and baud dropdowns. Changing the transport or baud saves the setting and reboots immediately.
+Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option, amplifier serial transport and baud controls, and a numeric web port field. Changing the transport, baud, or web port saves the setting and reboots immediately.
 
 Credentials are stored on the Giga QSPI filesystem. On restart, the firmware loads saved credentials and attempts to reconnect in the background. Failed attempts time out and are retried periodically without blocking the amplifier UI or serial control.
 
 ## Web UI
 
-When WiFi is connected, the firmware starts a lightweight HTTP server on port 80. The device prints the URL to the serial console after connection.
+When WiFi is connected, the firmware starts a lightweight HTTP server on the saved web port, defaulting to port 80. Change it from the setup popup numeric field or with `web-port <1-65535>` in the serial console. The device prints the URL to the serial console after connection.
 
 The web UI mirrors the LCD screen state and sends commands through the same amplifier control path as the physical/touch buttons. Status is exposed as JSON through `/api/status`, and button commands are sent through `/api/key?name=...`.
 
