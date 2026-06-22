@@ -32,6 +32,9 @@ struct SpeExpert1kReadResult {
 void spe_expert1k_serial_begin();
 int spe_expert1k_serial_available();
 bool spe_expert1k_serial_read(SpeExpert1kReadResult &result);
+bool spe_expert1k_amp_uses_usb_serial();
+bool spe_expert1k_usb_console_active();
+void spe_expert1k_usb_console_release();
 bool spe_expert1k_queue_command(std::initializer_list<uint8_t> cmd);
 void spe_expert1k_process_next_queued_command();
 void spe_expert1k_queue_packet(const Expert_Packet &packet, uint8_t len);

@@ -185,6 +185,7 @@ static void print_console_help()
   Serial.println(F("  scan        Blocking WiFi scan to serial"));
   Serial.println(F("  rcu         Send RCU_ON to the amplifier"));
   Serial.println(F("  dtr         Show amplifier DTR output state"));
+  Serial.println(F("  exit        Return USB serial to amplifier comms"));
   Serial.println(F("  setup       Open controller setup popup on the display"));
   Serial.println(F("  wifi-saved  Show saved WiFi credential state"));
   Serial.println(F("  wifi-clear  Clear saved WiFi credentials"));
@@ -272,6 +273,10 @@ static void print_serial_status()
 
   DebugSerialLock debug_lock;
   Serial.println(F("Amplifier serial stats:"));
+  Serial.print(F("  transport="));
+  Serial.println(spe_expert1k_amp_uses_usb_serial() ? F("USB Serial") : F("Serial1 UART"));
+  Serial.print(F("  usb_console_active="));
+  Serial.println(spe_expert1k_usb_console_active() ? F("yes") : F("no"));
   Serial.print(F("  rx_bytes="));
   Serial.println(snapshot.rx_bytes);
   Serial.print(F("  valid_packets="));
@@ -543,6 +548,16 @@ static void handle_console_command(char *line)
     Serial.print(amp_dtr_is_asserted() ? F("yes") : F("no"));
     Serial.print(F(" gpio_level="));
     Serial.println(amp_dtr_gpio_level() == HIGH ? F("HIGH") : F("LOW"));
+  } else if (strcmp(line, "exit") == 0 || strcmp(line, "passthrough") == 0) {
+    if (spe_expert1k_amp_uses_usb_serial()) {
+      DebugSerialLock debug_lock;
+      Serial.println(F("Returning USB serial to amplifier comms"));
+      Serial.flush();
+      spe_expert1k_usb_console_release();
+    } else {
+      DebugSerialLock debug_lock;
+      Serial.println(F("Amplifier comms are using Serial1 UART; console remains active"));
+    }
   } else if (strcmp(line, "setup") == 0 || strcmp(line, "wifi-popup") == 0) {
 #if SPE_ENABLE_WIFI_SETUP
     LvglLock lock;
@@ -888,7 +903,9 @@ void serial_task()
 void console_task()
 {
   while (true) {
-    serial_console_service(handle_console_command, print_console_poll_status);
+    if (!spe_expert1k_amp_uses_usb_serial() || spe_expert1k_usb_console_active()) {
+      serial_console_service(handle_console_command, print_console_poll_status);
+    }
     rtos::ThisThread::sleep_for(10ms);
   }
 }

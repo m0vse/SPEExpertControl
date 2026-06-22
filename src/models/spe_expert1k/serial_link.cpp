@@ -36,6 +36,12 @@ static rtos::Mutex packet_queue_mutex;
 static rtos::Mutex command_queue_mutex;
 static ExpertPacketParser parser;
 static uint32_t last_available = 0;
+static uint8_t usb_escape_count = 0;
+static bool usb_console_active = false;
+
+#ifndef SPE_AMP_SERIAL_USB
+#define SPE_AMP_SERIAL_USB 0
+#endif
 
 class SerialLock {
 public:
@@ -55,6 +61,14 @@ public:
   ~CommandQueueLock() { command_queue_mutex.unlock(); }
 };
 
+static Stream &amp_serial_port()
+{
+  if (SPE_AMP_SERIAL_USB) {
+    return Serial;
+  }
+  return Serial1;
+}
+
 static bool dequeue_command(QueuedAmpCommand &queued)
 {
   CommandQueueLock lock;
@@ -71,18 +85,22 @@ static bool dequeue_command(QueuedAmpCommand &queued)
 static void send_command_frame(const uint8_t *cmd, uint8_t len)
 {
   SerialLock lock;
+  if (SPE_AMP_SERIAL_USB && usb_console_active) {
+    return;
+  }
   serial_transport_note_command();
-  Serial1.write(0x55);
-  Serial1.write(0x55);
-  Serial1.write(0x55);
-  Serial1.write(len & 0xff);
+  Stream &port = amp_serial_port();
+  port.write(0x55);
+  port.write(0x55);
+  port.write(0x55);
+  port.write(len & 0xff);
   uint8_t sum = 0;
   for (uint8_t i = 0; i < len; ++i) {
     const uint8_t c = cmd[i];
-    Serial1.write(c);
+    port.write(c);
     sum += c;
   }
-  Serial1.write(sum);
+  port.write(sum);
 
 #if SPE_VERBOSE_PACKET_LOG
   Serial.print(F("TX command:"));
@@ -97,13 +115,19 @@ static void send_command_frame(const uint8_t *cmd, uint8_t len)
 void spe_expert1k_serial_begin()
 {
   SerialLock lock;
-  Serial1.begin(9600);
+  if (!SPE_AMP_SERIAL_USB) {
+    Serial1.begin(9600);
+  }
 }
 
 int spe_expert1k_serial_available()
 {
   SerialLock lock;
-  const int available_bytes = Serial1.available();
+  if (SPE_AMP_SERIAL_USB && usb_console_active) {
+    return 0;
+  }
+  Stream &port = amp_serial_port();
+  const int available_bytes = port.available();
   last_available = available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes);
   serial_transport_note_available(last_available);
   return available_bytes;
@@ -115,13 +139,30 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   int value = -1;
   {
     SerialLock lock;
-    const int available_bytes = Serial1.available();
+    if (SPE_AMP_SERIAL_USB && usb_console_active) {
+      return false;
+    }
+    Stream &port = amp_serial_port();
+    const int available_bytes = port.available();
     last_available = available_bytes < 0 ? 0 : static_cast<uint32_t>(available_bytes);
     serial_transport_note_available(last_available);
     if (available_bytes <= 0) {
       return false;
     }
-    value = Serial1.read();
+    value = port.read();
+  }
+
+  if (SPE_AMP_SERIAL_USB) {
+    if (value == 0x1b) {
+      if (++usb_escape_count >= 3) {
+        usb_console_active = true;
+        usb_escape_count = 0;
+        Serial.println();
+        Serial.println(F("USB serial console active. Type 'exit' to return USB to amplifier comms."));
+      }
+      return true;
+    }
+    usb_escape_count = 0;
   }
 
   serial_transport_note_rx_byte(micros());
@@ -133,6 +174,25 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   result.invalid_received_checksum = parser.invalidReceivedChecksum();
   result.last_available = last_available;
   return true;
+}
+
+bool spe_expert1k_amp_uses_usb_serial()
+{
+  return SPE_AMP_SERIAL_USB != 0;
+}
+
+bool spe_expert1k_usb_console_active()
+{
+  return SPE_AMP_SERIAL_USB && usb_console_active;
+}
+
+void spe_expert1k_usb_console_release()
+{
+  if (!SPE_AMP_SERIAL_USB) {
+    return;
+  }
+  usb_escape_count = 0;
+  usb_console_active = false;
 }
 
 bool spe_expert1k_queue_command(std::initializer_list<uint8_t> cmd)
