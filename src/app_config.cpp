@@ -103,6 +103,8 @@ bool app_config_load(void)
                 loaded.wifi_password[sizeof(loaded.wifi_password) - 1] = '\0';
             } else if (strncmp(line, "display_flipped=", 16) == 0) {
                 loaded.display_flipped = strcmp(line + 16, "1") == 0 || strcmp(line + 16, "true") == 0;
+            } else if (strncmp(line, "amp_serial_usb=", 15) == 0) {
+                loaded.amp_serial_usb = strcmp(line + 15, "1") == 0 || strcmp(line + 15, "true") == 0;
             }
         }
         fclose(fp);
@@ -140,6 +142,7 @@ bool app_config_save(void)
         fprintf(fp, "ssid=%s\n", snapshot.wifi_ssid);
         fprintf(fp, "password=%s\n", snapshot.wifi_password);
         fprintf(fp, "display_flipped=%d\n", snapshot.display_flipped ? 1 : 0);
+        fprintf(fp, "amp_serial_usb=%d\n", snapshot.amp_serial_usb ? 1 : 0);
         fclose(fp);
         saved = true;
     }
@@ -167,6 +170,22 @@ bool app_config_set_display_flipped(bool flipped)
     {
         ConfigLock lock;
         config.display_flipped = flipped;
+        config_loaded = true;
+    }
+    return app_config_save();
+}
+
+bool app_config_amp_serial_usb(void)
+{
+    ConfigLock lock;
+    return config.amp_serial_usb;
+}
+
+bool app_config_set_amp_serial_usb(bool enabled)
+{
+    {
+        ConfigLock lock;
+        config.amp_serial_usb = enabled;
         config_loaded = true;
     }
     return app_config_save();

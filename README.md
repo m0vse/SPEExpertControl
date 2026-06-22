@@ -98,11 +98,7 @@ The environment uses DFU upload. If the board is already in DFU mode, PlatformIO
 
 The normal amplifier link uses `Serial1` through the MAX3232 RS-232 interface. This is the default and is the recommended configuration for the SPE Expert 1K-FA hardware.
 
-For model-protocol development or bench testing, the amplifier protocol can instead use the USB CDC `Serial` port by adding this build flag to the main environment:
-
-```ini
--D SPE_AMP_SERIAL_USB=1
-```
+For model-protocol development or bench testing, the amplifier protocol can instead use the USB CDC `Serial` port. Open the controller setup popup and select `Amp serial: USB` from the transport dropdown, or use the serial console command `amp-serial usb`. Changing this setting saves it to QSPI storage and immediately reboots so the serial tasks restart on the selected transport. Use `Amp serial: UART` or `amp-serial uart` to return to the default.
 
 In USB amplifier mode the normal debug console is disabled so it does not consume amplifier bytes. Press `Esc` three times on the USB serial terminal to open the console. Type `exit` or `passthrough` to return the USB port to amplifier communications. Do not use USB amplifier mode for normal operation while the amplifier is still wired to `Serial1`.
 
@@ -116,7 +112,7 @@ pio device monitor -e giga_r1_m7_spe_expert1k
 
 Commands are line based, case-insensitive, and are submitted with Enter. Backspace is supported while entering a command.
 
-When `SPE_AMP_SERIAL_USB=1` is enabled, press `Esc` three times to open the console before entering commands. The `exit` command releases the USB port back to the amplifier protocol.
+When USB amplifier serial is enabled, press `Esc` three times to open the console before entering commands. The `exit` command releases the USB port back to the amplifier protocol.
 
 ### Console Commands
 
@@ -133,6 +129,7 @@ When `SPE_AMP_SERIAL_USB=1` is enabled, press `Esc` three times to open the cons
 | `reboot` | `reset` | Reboot the controller with `NVIC_SystemReset()`. |
 | `rcu` | - | Queue an `RCU_ON` command to the amplifier. |
 | `dtr` | - | Print the configured DTR pin, logical asserted state, and actual GPIO level. With the current MAX3232 wiring, asserted DTR is `D7 LOW`. |
+| `amp-serial` | `ampserial` | Print the active and saved amplifier serial transport. Use `amp-serial uart` or `amp-serial usb` to save a new transport and reboot. |
 | `exit` | `passthrough` | In USB amplifier mode, close the debug console and return USB `Serial` to amplifier communications. In normal UART mode, this reports that the console remains active. |
 | `setup` | `wifi-popup` | Open the hidden controller setup popup on the LCD. This is the same panel opened by tapping the top-left of the display. |
 | `wifi-saved` | - | Print whether saved WiFi credentials exist, the saved SSID, and password length. The password itself is not printed. |
@@ -176,9 +173,9 @@ The `stats` command reports Mbed heap, stack, CPU, and RTOS thread data. Thread 
 
 ## Setup And WiFi
 
-WiFi and display orientation are configured from a hidden setup popup on the LCD. Tap the top-left of the display or run the serial console `setup` command to open it.
+WiFi, display orientation, and amplifier serial transport are configured from a hidden setup popup on the LCD. Tap the top-left of the display or run the serial console `setup` command to open it.
 
-Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option for mounting the controller upside down.
+Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option for mounting the controller upside down and an amplifier serial transport dropdown. Changing the transport between UART and USB saves the setting and reboots immediately.
 
 Credentials are stored on the Giga QSPI filesystem. On restart, the firmware loads saved credentials and attempts to reconnect in the background. Failed attempts time out and are retried periodically without blocking the amplifier UI or serial control.
 

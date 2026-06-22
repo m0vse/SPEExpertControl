@@ -185,6 +185,7 @@ static void print_console_help()
   Serial.println(F("  scan        Blocking WiFi scan to serial"));
   Serial.println(F("  rcu         Send RCU_ON to the amplifier"));
   Serial.println(F("  dtr         Show amplifier DTR output state"));
+  Serial.println(F("  amp-serial  Show or set amplifier serial transport"));
   Serial.println(F("  exit        Return USB serial to amplifier comms"));
   Serial.println(F("  setup       Open controller setup popup on the display"));
   Serial.println(F("  wifi-saved  Show saved WiFi credential state"));
@@ -505,6 +506,43 @@ static void reboot_controller()
   NVIC_SystemReset();
 }
 
+static void print_amp_serial_config()
+{
+  DebugSerialLock debug_lock;
+  Serial.print(F("Active amplifier serial transport: "));
+  Serial.println(spe_expert1k_amp_uses_usb_serial() ? F("USB Serial") : F("Serial1 UART"));
+  Serial.print(F("Saved amplifier serial transport: "));
+  Serial.println(app_config_amp_serial_usb() ? F("USB Serial") : F("Serial1 UART"));
+  Serial.println(F("Use 'amp-serial uart' or 'amp-serial usb' to change it."));
+}
+
+static void set_amp_serial_config(bool usb)
+{
+  const bool saved = app_config_amp_serial_usb();
+  if (saved == usb) {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Amplifier serial transport already saved as "));
+    Serial.println(usb ? F("USB Serial") : F("Serial1 UART"));
+    return;
+  }
+
+  if (!app_config_set_amp_serial_usb(usb)) {
+    DebugSerialLock debug_lock;
+    Serial.println(F("Failed to save amplifier serial transport setting"));
+    return;
+  }
+
+  {
+    DebugSerialLock debug_lock;
+    Serial.print(F("Saved amplifier serial transport as "));
+    Serial.print(usb ? F("USB Serial") : F("Serial1 UART"));
+    Serial.println(F("; rebooting to apply"));
+    Serial.flush();
+  }
+  delay(100);
+  NVIC_SystemReset();
+}
+
 static void handle_console_command(char *line)
 {
   while (*line == ' ' || *line == '\t') {
@@ -548,6 +586,12 @@ static void handle_console_command(char *line)
     Serial.print(amp_dtr_is_asserted() ? F("yes") : F("no"));
     Serial.print(F(" gpio_level="));
     Serial.println(amp_dtr_gpio_level() == HIGH ? F("HIGH") : F("LOW"));
+  } else if (strcmp(line, "amp-serial") == 0 || strcmp(line, "ampserial") == 0) {
+    print_amp_serial_config();
+  } else if (strcmp(line, "amp-serial usb") == 0 || strcmp(line, "ampserial usb") == 0) {
+    set_amp_serial_config(true);
+  } else if (strcmp(line, "amp-serial uart") == 0 || strcmp(line, "ampserial uart") == 0) {
+    set_amp_serial_config(false);
   } else if (strcmp(line, "exit") == 0 || strcmp(line, "passthrough") == 0) {
     if (spe_expert1k_amp_uses_usb_serial()) {
       DebugSerialLock debug_lock;

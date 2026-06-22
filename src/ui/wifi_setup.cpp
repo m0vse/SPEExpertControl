@@ -59,6 +59,7 @@ static lv_obj_t *wifi_dropdown = NULL;
 static lv_obj_t *wifi_password = NULL;
 static lv_obj_t *display_flip_button = NULL;
 static lv_obj_t *display_flip_label = NULL;
+static lv_obj_t *amp_serial_dropdown = NULL;
 static lv_obj_t *wifi_keyboard = NULL;
 static lv_obj_t *wifi_status_label = NULL;
 static lv_obj_t *wifi_hotspot = NULL;
@@ -68,6 +69,7 @@ static void wifi_rescan_event_cb(lv_event_t *e);
 static void wifi_skip_event_cb(lv_event_t *e);
 static void wifi_password_event_cb(lv_event_t *e);
 static void display_flip_event_cb(lv_event_t *e);
+static void amp_serial_event_cb(lv_event_t *e);
 static void wifi_hotspot_event_cb(lv_event_t *e);
 static void connect_selected_wifi(void);
 static void wifi_keyboard_set_visible(bool visible);
@@ -78,6 +80,7 @@ static void wifi_connect_saved(void);
 static void wifi_set_status_text(const char *status_text, const char *startup_text);
 static void wifi_apply_ui_updates(void);
 static void wifi_apply_scan_results(void);
+static void reboot_after_config_change(const char *message);
 
 class WifiStateLock {
 public:
@@ -118,12 +121,19 @@ void wifi_setup_create(void) {
     lv_obj_set_pos(title, 0, 0);
 
     display_flip_button = lv_button_create(wifi_panel);
-    lv_obj_set_size(display_flip_button, 250, 42);
+    lv_obj_set_size(display_flip_button, 220, 42);
     lv_obj_set_pos(display_flip_button, 0, 30);
     lv_obj_add_event_cb(display_flip_button, display_flip_event_cb, LV_EVENT_CLICKED, NULL);
     display_flip_label = lv_label_create(display_flip_button);
     lv_label_set_text_fmt(display_flip_label, "Flip display: %s", app_config_display_flipped() ? "On" : "Off");
     lv_obj_center(display_flip_label);
+
+    amp_serial_dropdown = lv_dropdown_create(wifi_panel);
+    lv_obj_set_size(amp_serial_dropdown, 250, 42);
+    lv_obj_set_pos(amp_serial_dropdown, 245, 30);
+    lv_dropdown_set_options(amp_serial_dropdown, "Amp serial: UART\nAmp serial: USB");
+    lv_dropdown_set_selected(amp_serial_dropdown, app_config_amp_serial_usb() ? 1 : 0);
+    lv_obj_add_event_cb(amp_serial_dropdown, amp_serial_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     wifi_dropdown = lv_dropdown_create(wifi_panel);
     lv_obj_set_size(wifi_dropdown, 430, 42);
@@ -601,6 +611,24 @@ static void display_flip_event_cb(lv_event_t *e) {
     lv_label_set_text(wifi_status_label, saved ? "Display orientation updated." : "Display orientation changed, but saving failed.");
 }
 
+static void amp_serial_event_cb(lv_event_t *e) {
+    lv_obj_t *dropdown = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    const bool enabled = lv_dropdown_get_selected(dropdown) == 1;
+    const bool current = app_config_amp_serial_usb();
+
+    if (enabled == current) {
+        return;
+    }
+
+    if (!app_config_set_amp_serial_usb(enabled)) {
+        lv_dropdown_set_selected(dropdown, current ? 1 : 0);
+        lv_label_set_text(wifi_status_label, "Amp serial setting changed, but saving failed.");
+        return;
+    }
+
+    reboot_after_config_change(enabled ? "USB amp serial saved. Rebooting..." : "UART amp serial saved. Rebooting...");
+}
+
 static void wifi_hotspot_event_cb(lv_event_t *e) {
     (void)e;
     {
@@ -840,4 +868,15 @@ static void wifi_apply_scan_results(void) {
         lv_label_set_text(wifi_status_label, "Select a network, enter password, then connect.");
     }
     lv_label_set_text(ui_startupMessage, "WiFi setup ready");
+}
+
+static void reboot_after_config_change(const char *message) {
+    if (wifi_status_label) {
+        lv_label_set_text(wifi_status_label, message);
+    }
+    lv_timer_handler();
+    Serial.println(message);
+    Serial.flush();
+    delay(250);
+    NVIC_SystemReset();
 }

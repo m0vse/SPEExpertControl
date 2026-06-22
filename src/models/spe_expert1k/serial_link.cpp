@@ -7,6 +7,7 @@
 
 #include "models/spe_expert1k/serial_link.h"
 
+#include "app_config.h"
 #include "serial/transport_stats.h"
 #include <rtos.h>
 
@@ -38,10 +39,7 @@ static ExpertPacketParser parser;
 static uint32_t last_available = 0;
 static uint8_t usb_escape_count = 0;
 static bool usb_console_active = false;
-
-#ifndef SPE_AMP_SERIAL_USB
-#define SPE_AMP_SERIAL_USB 0
-#endif
+static bool amp_serial_usb = false;
 
 class SerialLock {
 public:
@@ -63,7 +61,7 @@ public:
 
 static Stream &amp_serial_port()
 {
-  if (SPE_AMP_SERIAL_USB) {
+  if (amp_serial_usb) {
     return Serial;
   }
   return Serial1;
@@ -85,7 +83,7 @@ static bool dequeue_command(QueuedAmpCommand &queued)
 static void send_command_frame(const uint8_t *cmd, uint8_t len)
 {
   SerialLock lock;
-  if (SPE_AMP_SERIAL_USB && usb_console_active) {
+  if (amp_serial_usb && usb_console_active) {
     return;
   }
   serial_transport_note_command();
@@ -115,7 +113,10 @@ static void send_command_frame(const uint8_t *cmd, uint8_t len)
 void spe_expert1k_serial_begin()
 {
   SerialLock lock;
-  if (!SPE_AMP_SERIAL_USB) {
+  amp_serial_usb = app_config_amp_serial_usb();
+  usb_escape_count = 0;
+  usb_console_active = false;
+  if (!amp_serial_usb) {
     Serial1.begin(9600);
   }
 }
@@ -123,7 +124,7 @@ void spe_expert1k_serial_begin()
 int spe_expert1k_serial_available()
 {
   SerialLock lock;
-  if (SPE_AMP_SERIAL_USB && usb_console_active) {
+  if (amp_serial_usb && usb_console_active) {
     return 0;
   }
   Stream &port = amp_serial_port();
@@ -139,7 +140,7 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
   int value = -1;
   {
     SerialLock lock;
-    if (SPE_AMP_SERIAL_USB && usb_console_active) {
+    if (amp_serial_usb && usb_console_active) {
       return false;
     }
     Stream &port = amp_serial_port();
@@ -152,7 +153,7 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
     value = port.read();
   }
 
-  if (SPE_AMP_SERIAL_USB) {
+  if (amp_serial_usb) {
     if (value == 0x1b) {
       if (++usb_escape_count >= 3) {
         usb_console_active = true;
@@ -178,17 +179,17 @@ bool spe_expert1k_serial_read(SpeExpert1kReadResult &result)
 
 bool spe_expert1k_amp_uses_usb_serial()
 {
-  return SPE_AMP_SERIAL_USB != 0;
+  return amp_serial_usb;
 }
 
 bool spe_expert1k_usb_console_active()
 {
-  return SPE_AMP_SERIAL_USB && usb_console_active;
+  return amp_serial_usb && usb_console_active;
 }
 
 void spe_expert1k_usb_console_release()
 {
-  if (!SPE_AMP_SERIAL_USB) {
+  if (!amp_serial_usb) {
     return;
   }
   usb_escape_count = 0;
