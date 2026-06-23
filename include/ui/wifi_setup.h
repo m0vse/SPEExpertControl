@@ -7,6 +7,21 @@
 
 #pragma once
 
+#include <stdint.h>
+
+struct WifiHealthSnapshot {
+    uint32_t health_checks;
+    uint32_t gateway_ping_failures;
+    uint32_t watchdog_reconnects;
+    unsigned long last_health_check_ms;
+    unsigned long last_health_failure_ms;
+    int last_status;
+    int last_gateway_ping_ms;
+    uint8_t consecutive_gateway_failures;
+    uint8_t gateway_failure_threshold;
+    unsigned long check_interval_ms;
+};
+
 /**
  * Create the hidden WiFi setup popup and load any saved credentials.
  */
@@ -29,6 +44,11 @@ void wifi_setup_service(void);
  * LVGL mutex.
  */
 void wifi_setup_connection_service(void);
+
+/**
+ * Periodically check connected WiFi reachability and force reconnect if needed.
+ */
+void wifi_setup_health_service(void);
 
 /**
  * Show or hide the WiFi setup popup.
@@ -61,6 +81,16 @@ bool wifi_setup_has_saved_credentials(void);
  * Remove saved WiFi credentials from QSPI settings storage.
  */
 void wifi_setup_clear_saved_credentials(void);
+
+/**
+ * Force the WiFi state machine to disconnect and reconnect using saved credentials.
+ */
+void wifi_setup_force_reconnect(void);
+
+/**
+ * Return WiFi gateway watchdog counters for serial diagnostics.
+ */
+WifiHealthSnapshot wifi_setup_health_snapshot(void);
 
 /**
  * Print saved credential state to the debug serial console without printing the password.

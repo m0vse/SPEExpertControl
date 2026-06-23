@@ -27,6 +27,9 @@ static const unsigned long WIFI_AUTOCONNECT_DELAY_MS = 2500;
 static const unsigned long WIFI_FIRST_RETRY_MS = 3000;
 static const unsigned long WIFI_SECOND_RETRY_MS = 7000;
 static const unsigned long WIFI_RECONNECT_RETRY_MS = 30000;
+static const unsigned long WIFI_HEALTH_INITIAL_DELAY_MS = 30000;
+static const unsigned long WIFI_HEALTH_CHECK_INTERVAL_MS = 30000;
+static const uint8_t WIFI_HEALTH_GATEWAY_FAILURE_LIMIT = 3;
 
 static char wifi_ssids[MAX_WIFI_NETWORKS][MAX_WIFI_SSID_LEN + 1];
 static char wifi_dropdown_options[(MAX_WIFI_SSID_LEN + 16) * MAX_WIFI_NETWORKS];
@@ -52,6 +55,15 @@ static bool wifi_scan_result_pending = false;
 static int wifi_scan_result = 0;
 static int wifi_scan_count = 0;
 static uint8_t wifi_retry_count = 0;
+static uint32_t wifi_health_checks = 0;
+static uint32_t wifi_health_gateway_failures = 0;
+static uint32_t wifi_health_watchdog_reconnects = 0;
+static uint8_t wifi_health_consecutive_failures = 0;
+static unsigned long wifi_next_health_check = WIFI_HEALTH_INITIAL_DELAY_MS;
+static unsigned long wifi_last_health_check_ms = 0;
+static unsigned long wifi_last_health_failure_ms = 0;
+static int wifi_last_health_status = WL_IDLE_STATUS;
+static int wifi_last_health_ping_ms = -2;
 static unsigned long wifi_connect_started = 0;
 static unsigned long wifi_next_reconnect = WIFI_AUTOCONNECT_DELAY_MS;
 static char wifi_status_text[96];
@@ -454,6 +466,8 @@ void wifi_setup_connection_service(void) {
                 wifi_setup_active = false;
                 pending_save_on_success = false;
                 wifi_hide_requested = true;
+                wifi_health_consecutive_failures = 0;
+                wifi_next_health_check = now + WIFI_HEALTH_CHECK_INTERVAL_MS;
             }
             char status_text[96];
             char startup_text[96];
@@ -515,6 +529,8 @@ void wifi_setup_connection_service(void) {
                 wifi_retry_count = 0;
                 pending_save_on_success = false;
                 wifi_hide_requested = true;
+                wifi_health_consecutive_failures = 0;
+                wifi_next_health_check = now + WIFI_HEALTH_CHECK_INTERVAL_MS;
             }
             char status_text[96];
             char startup_text[96];
@@ -532,6 +548,8 @@ void wifi_setup_connection_service(void) {
                 wifi_setup_active = true;
                 wifi_retry_count = 0;
                 wifi_next_reconnect = now;
+                wifi_health_consecutive_failures = 0;
+                wifi_next_health_check = now + WIFI_HEALTH_CHECK_INTERVAL_MS;
             }
         if (debug_background_logs_enabled()) {
             Serial.print("WiFi disconnected, status ");
@@ -560,6 +578,73 @@ void wifi_setup_connection_service(void) {
 
     if (saved_valid && now >= next_reconnect) {
         wifi_connect_saved();
+    }
+}
+
+void wifi_setup_health_service(void) {
+    const unsigned long now = millis();
+
+    {
+        WifiStateLock state_lock;
+        if (!wifi_stack_available || wifi_connecting || wifi_scan_running || wifi_scan_requested) {
+            return;
+        }
+        if (now < wifi_next_health_check) {
+            return;
+        }
+        wifi_next_health_check = now + WIFI_HEALTH_CHECK_INTERVAL_MS;
+    }
+
+    int status = WL_IDLE_STATUS;
+    int ping_ms = -1;
+    bool gateway_valid = false;
+
+    {
+        WifiStackLock lock;
+        status = WiFi.status();
+        if (status == WL_CONNECTED) {
+            IPAddress gateway = WiFi.gatewayIP();
+            gateway_valid = gateway[0] || gateway[1] || gateway[2] || gateway[3];
+            if (gateway_valid) {
+                ping_ms = WiFi.ping(gateway, 255, 1000);
+            }
+        }
+    }
+
+    bool reconnect_required = false;
+    {
+        WifiStateLock state_lock;
+        ++wifi_health_checks;
+        wifi_last_health_check_ms = now;
+        wifi_last_health_status = status;
+        wifi_last_health_ping_ms = ping_ms;
+
+        if (status != WL_CONNECTED) {
+            wifi_health_consecutive_failures = 0;
+            return;
+        }
+
+        if (gateway_valid && ping_ms >= 0) {
+            wifi_health_consecutive_failures = 0;
+            return;
+        }
+
+        ++wifi_health_gateway_failures;
+        ++wifi_health_consecutive_failures;
+        wifi_last_health_failure_ms = now;
+
+        if (wifi_health_consecutive_failures >= WIFI_HEALTH_GATEWAY_FAILURE_LIMIT) {
+            ++wifi_health_watchdog_reconnects;
+            wifi_health_consecutive_failures = 0;
+            reconnect_required = true;
+        }
+    }
+
+    if (reconnect_required) {
+        if (debug_background_logs_enabled()) {
+            Serial.println("WiFi watchdog: gateway unreachable, forcing reconnect");
+        }
+        wifi_setup_force_reconnect();
     }
 }
 
@@ -600,6 +685,8 @@ void wifi_setup_clear_saved_credentials(void) {
         wifi_retry_count = 0;
         pending_save_on_success = false;
         wifi_next_reconnect = millis() + WIFI_RECONNECT_RETRY_MS;
+        wifi_health_consecutive_failures = 0;
+        wifi_next_health_check = millis() + WIFI_HEALTH_CHECK_INTERVAL_MS;
     }
     {
         WifiStackLock lock;
@@ -608,6 +695,45 @@ void wifi_setup_clear_saved_credentials(void) {
     if (debug_background_logs_enabled()) {
         Serial.println("Saved WiFi credentials cleared");
     }
+}
+
+void wifi_setup_force_reconnect(void) {
+    const unsigned long now = millis();
+    {
+        WifiStackLock lock;
+        WiFi.disconnect();
+    }
+
+    {
+        WifiStateLock state_lock;
+        wifi_connecting = false;
+        wifi_connected = false;
+        wifi_setup_active = true;
+        wifi_skipped = false;
+        wifi_retry_count = 0;
+        pending_save_on_success = false;
+        wifi_next_reconnect = now;
+        wifi_health_consecutive_failures = 0;
+        wifi_next_health_check = now + WIFI_HEALTH_CHECK_INTERVAL_MS;
+    }
+
+    wifi_set_status_text("WiFi reconnect requested.", "WiFi reconnect requested");
+}
+
+WifiHealthSnapshot wifi_setup_health_snapshot(void) {
+    WifiStateLock state_lock;
+    return {
+        wifi_health_checks,
+        wifi_health_gateway_failures,
+        wifi_health_watchdog_reconnects,
+        wifi_last_health_check_ms,
+        wifi_last_health_failure_ms,
+        wifi_last_health_status,
+        wifi_last_health_ping_ms,
+        wifi_health_consecutive_failures,
+        WIFI_HEALTH_GATEWAY_FAILURE_LIMIT,
+        WIFI_HEALTH_CHECK_INTERVAL_MS
+    };
 }
 
 void wifi_setup_print_saved_credentials(void) {

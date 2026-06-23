@@ -368,7 +368,9 @@ static void print_console_help()
   Serial.println(F("Commands:"));
   Serial.println(F("  help        Show this help"));
   Serial.println(F("  status      Controller summary"));
-  Serial.println(F("  wifi        WiFi status, IP and firmware"));
+  Serial.println(F("  wifi        WiFi status, IP, firmware and watchdog"));
+  Serial.println(F("  wifi-ping   Ping the configured gateway"));
+  Serial.println(F("  wifi-reset  Force WiFi disconnect/reconnect"));
   Serial.println(F("  web         HTTP server counters"));
   Serial.println(F("  web-port    Show or set HTTP server port"));
   Serial.println(F("  serial      Amplifier serial health counters"));
@@ -399,12 +401,15 @@ static void print_wifi_status()
   String ssid;
   IPAddress ip;
   long rssi = 0;
-  status = WiFi.status();
-  firmware = WiFi.firmwareVersion();
-  if (status == WL_CONNECTED) {
-    ssid = WiFi.SSID();
-    ip = WiFi.localIP();
-    rssi = WiFi.RSSI();
+  {
+    WifiStackLock wifi_lock;
+    status = WiFi.status();
+    firmware = WiFi.firmwareVersion();
+    if (status == WL_CONNECTED) {
+      ssid = WiFi.SSID();
+      ip = WiFi.localIP();
+      rssi = WiFi.RSSI();
+    }
   }
   const bool setup_connected =
 #if SPE_ENABLE_WIFI_SETUP
@@ -442,6 +447,90 @@ static void print_wifi_status()
     Serial.print(F("RSSI="));
     Serial.print(rssi);
     Serial.println(F(" dBm"));
+  }
+#if SPE_ENABLE_WIFI_SETUP
+  const WifiHealthSnapshot health = wifi_setup_health_snapshot();
+  Serial.println(F("WiFi watchdog:"));
+  Serial.print(F("  checks="));
+  Serial.println(health.health_checks);
+  Serial.print(F("  interval_ms="));
+  Serial.println(health.check_interval_ms);
+  Serial.print(F("  gateway_ping_failures="));
+  Serial.println(health.gateway_ping_failures);
+  Serial.print(F("  consecutive_gateway_failures="));
+  Serial.print(health.consecutive_gateway_failures);
+  Serial.print('/');
+  Serial.println(health.gateway_failure_threshold);
+  Serial.print(F("  watchdog_reconnects="));
+  Serial.println(health.watchdog_reconnects);
+  Serial.print(F("  last_health_check_ms="));
+  Serial.println(health.last_health_check_ms);
+  Serial.print(F("  last_health_status="));
+  Serial.print(health.last_status);
+  Serial.print(F(" ("));
+  Serial.print(wifi_status_name(health.last_status));
+  Serial.println(F(")"));
+  Serial.print(F("  last_gateway_ping="));
+  if (health.last_gateway_ping_ms == -2) {
+    Serial.println(F("not_run"));
+  } else if (health.last_gateway_ping_ms >= 0) {
+    Serial.print(health.last_gateway_ping_ms);
+    Serial.println(F(" ms"));
+  } else {
+    Serial.println(F("failed"));
+  }
+  Serial.print(F("  last_health_failure_ms="));
+  Serial.println(health.last_health_failure_ms);
+#endif
+#else
+  DebugSerialLock debug_lock;
+  Serial.println(F("WiFi disabled at build time"));
+#endif
+}
+
+static void print_wifi_gateway_ping()
+{
+#if SPE_ENABLE_WIFI_SETUP || SPE_ENABLE_WEB_SERVER
+  int status = WL_IDLE_STATUS;
+  IPAddress ip;
+  IPAddress gateway;
+  long rssi = 0;
+  int ping_ms = -1;
+
+  {
+    WifiStackLock wifi_lock;
+    status = WiFi.status();
+    if (status == WL_CONNECTED) {
+      ip = WiFi.localIP();
+      gateway = WiFi.gatewayIP();
+      rssi = WiFi.RSSI();
+      ping_ms = WiFi.ping(gateway, 255, 1000);
+    }
+  }
+
+  DebugSerialLock debug_lock;
+  Serial.print(F("WiFi status="));
+  Serial.print(status);
+  Serial.print(F(" ("));
+  Serial.print(wifi_status_name(status));
+  Serial.println(F(")"));
+  if (status != WL_CONNECTED) {
+    Serial.println(F("Gateway ping skipped: WiFi is not connected"));
+    return;
+  }
+  Serial.print(F("IP="));
+  Serial.println(ip);
+  Serial.print(F("Gateway="));
+  Serial.println(gateway);
+  Serial.print(F("RSSI="));
+  Serial.print(rssi);
+  Serial.println(F(" dBm"));
+  Serial.print(F("Gateway ping="));
+  if (ping_ms >= 0) {
+    Serial.print(ping_ms);
+    Serial.println(F(" ms"));
+  } else {
+    Serial.println(F("failed"));
   }
 #else
   DebugSerialLock debug_lock;
@@ -1007,6 +1096,17 @@ static void handle_console_command(char *line)
     print_controller_status();
   } else if (strcmp(line, "wifi") == 0) {
     print_wifi_status();
+  } else if (strcmp(line, "wifi-ping") == 0 || strcmp(line, "wifiping") == 0 || strcmp(line, "net-ping") == 0) {
+    print_wifi_gateway_ping();
+  } else if (strcmp(line, "wifi-reset") == 0 || strcmp(line, "wifi-reconnect") == 0) {
+#if SPE_ENABLE_WIFI_SETUP
+    wifi_setup_force_reconnect();
+    DebugSerialLock debug_lock;
+    Serial.println(F("WiFi reconnect requested"));
+#else
+    DebugSerialLock debug_lock;
+    Serial.println(F("WiFi setup disabled at build time"));
+#endif
   } else if (strcmp(line, "web") == 0) {
     print_web_status();
   } else if (strcmp(line, "web-port") == 0 || strcmp(line, "webport") == 0) {
@@ -1475,6 +1575,7 @@ void wifi_task()
   while (true) {
 #if SPE_ENABLE_WIFI_SETUP && SPE_BRINGUP_LEVEL >= 4
     wifi_setup_connection_service();
+    wifi_setup_health_service();
 #endif
     rtos::ThisThread::sleep_for(100ms);
   }

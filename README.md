@@ -138,7 +138,9 @@ When USB amplifier serial is enabled, press `Esc` three times to open the consol
 | --- | --- | --- |
 | `help` | `?` | Show the firmware command list. |
 | `status` | - | Print controller uptime, boot progress, touch state, transformed input-device count, current screen, and `serial1_available` when high bring-up diagnostics are enabled. |
-| `wifi` | - | Print WiFi status code/name, WiFi firmware version, setup connection state, saved-credential state, and SSID/IP/RSSI when connected. |
+| `wifi` | - | Print WiFi status code/name, WiFi firmware version, setup connection state, saved-credential state, SSID/IP/RSSI when connected, and WiFi watchdog counters. |
+| `wifi-ping` | `net-ping` | Ping the configured gateway from the controller and print IP, gateway, RSSI, and RTT/error. Use this when `WiFi.status()` says connected but the controller cannot be reached from another machine. |
+| `wifi-reset` | `wifi-reconnect` | Force a WiFi disconnect and schedule an immediate reconnect using saved credentials, without rebooting the controller. |
 | `web` | - | Print HTTP server counters, including starts, disconnects, active port, client count, request counts, bad key requests, and the last request path/time. |
 | `serial` | `ser` | Print amplifier UART health counters. Use this when checking checksum errors, queue depth, missed packets, or whether the serial task is falling behind. |
 | `amp` | - | Print the last decoded 30-byte amplifier status packet, screen name, DTR state, band, input, antenna, CAT mode, output power setting, power, reflected power, SWR/gain, temperature, PA voltage, and PA current. |
@@ -203,7 +205,7 @@ WiFi, display orientation, amplifier serial transport, web server port, and LCD 
 
 Use `Search` to scan, select an SSID, enter the password, and press `Connect`. The popup also includes a display flip option, amplifier serial transport and baud controls, a numeric web port field, and a numeric LCD sleep timeout in minutes. Changing the transport, baud, or web port saves the setting and reboots immediately. Changing the LCD sleep timeout applies immediately; `0` disables it.
 
-Credentials are stored on the Giga QSPI filesystem. On restart, the firmware loads saved credentials and attempts to reconnect in the background. Failed attempts time out and are retried periodically without blocking the amplifier UI or serial control.
+Credentials are stored on the Giga QSPI filesystem. On restart, the firmware loads saved credentials and attempts to reconnect in the background. Failed attempts time out and are retried periodically without blocking the amplifier UI or serial control. Once connected, a background WiFi watchdog pings the configured gateway every 30 seconds. Three consecutive gateway ping failures force a disconnect/reconnect cycle, which helps recover from cases where the WiFi stack still reports `WL_CONNECTED` but the controller is no longer reachable on the network.
 
 ## LCD Sleep
 
